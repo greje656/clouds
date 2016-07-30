@@ -1,0 +1,9 @@
+category = "Clouds"
+render_configs = ["core/stingray_renderer/renderer"]
+display_name = "Weather Data"
+activate = """
+    Application.set_render_setting("clouds_weather_data_visualization", "true")
+"""
+deactivate = """
+    Application.set_render_setting("clouds_weather_data_visualization", "false")
+"""

@@ -1,0 +1,32 @@
+
+"$version" = "0.2.0"
+components = {
+	"17c78faa-73b0-4a26-9901-a3f46f1e2090" = {
+		"$component" = {
+			"$resource_name" = "clouds-resources/clouds"
+			"$resource_type" = "component"
+		}
+	}
+	"6e422ebe-3c7a-4e83-86b4-1285ea771c32" = {
+		"$component" = {
+			"$resource_name" = "clouds-resources/clouds_advance"
+			"$resource_type" = "component"
+		}
+	}
+	"62729a8c-3e67-41f3-8eca-d9a18782eb01" = {
+		"$component" = {
+			"$resource_name" = "clouds-resources/sky"
+			"$resource_type" = "component"
+		}
+	}
+	"d0492095-fae6-4b9d-95ef-6a41fd081a7f" = {
+		"$component" = {
+			"$resource_name" = "core/components/script"
+			"$resource_type" = "component"
+		}
+		script = {
+			"$resource_name" = "clouds-resources/clouds"
+			"$resource_type" = "lua"
+		}
+	}
+}

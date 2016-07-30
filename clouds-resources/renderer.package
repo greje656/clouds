@@ -1,0 +1,3 @@
+render_config = [
+	"clouds-resources/renderer"
+]

@@ -1,0 +1,47 @@
+shading_component_mapping = {
+	clouds_advance_ambient_top = { type="scalar" path=["clouds_advance_ambient_top"] }
+	clouds_advance_ambient_bottom = { type="scalar" path=["clouds_advance_ambient_bottom"] }
+	clouds_advance_scattering_color_blend = { type="scalar" path=["clouds_advance_scattering_color_blend"] }
+	clouds_advance_extinction_color1 = { type="color" path={ rgb = ["clouds_advance_extinction_color1", "rgb"] intensity = ["clouds_advance_extinction_color1", "intensity"] } }
+	clouds_advance_extinction_color2 = { type="color" path={ rgb = ["clouds_advance_extinction_color2", "rgb"] intensity = ["clouds_advance_extinction_color2", "intensity"] } }
+	clouds_advance_extinction_color3 = { type="color" path={ rgb = ["clouds_advance_extinction_color3", "rgb"] intensity = ["clouds_advance_extinction_color3", "intensity"] } }
+	clouds_advance_extinction_reducer = { type="vector2" path=["clouds_advance_extinction_reducer"] }
+	clouds_advance_bottom_darkening_start = { type="vector2" path=["clouds_advance_bottom_darkening_start"] }
+	clouds_advance_bottom_darkening = { type="vector2" path=["clouds_advance_bottom_darkening"] }
+	clouds_advance_extinction = { type="vector2" path=["clouds_advance_extinction"] }
+	clouds_advance_extinction_distance = { type="scalar" path=["clouds_advance_extinction_distance"] }
+	clouds_advance_extinction_near = { type="vector2" path=["clouds_advance_extinction_near"] }
+	clouds_advance_extinction_far = { type="vector2" path=["clouds_advance_extinction_far"] }
+	clouds_advance_extinction_color_blend = { type="vector2" path=["clouds_advance_extinction_color_blend"] }
+	clouds_advance_scattering = { type="vector2" path=["clouds_advance_scattering"] }
+	clouds_advance_extinction_color_scalar = { type="vector2" path=["clouds_advance_extinction_color_scalar"] }
+	clouds_advance_powder_amount_near = { type="vector2" path=["clouds_advance_powder_amount_near"] }
+	clouds_advance_powder_amount_far = { type="vector2" path=["clouds_advance_powder_amount_far"] }
+	clouds_advance_powder_coef_near = { type="vector2" path=["clouds_advance_powder_coef_near"] }
+	clouds_advance_powder_coef_far = { type="vector2" path=["clouds_advance_powder_coef_far"] }
+	clouds_advance_powder_top = { type="scalar" path=["clouds_advance_powder_top"] }
+	clouds_advance_scale = { type="scalar" path=["clouds_advance_scale"] }
+	clouds_advance_erode_scale = { type="scalar" path=["clouds_advance_erode_scale"] }
+	clouds_advance_erode_low = { type="vector2" path=["clouds_advance_erode_low"] }
+	clouds_advance_erode_high = { type="vector2" path=["clouds_advance_erode_high"] }
+	clouds_advance_wyspie_transition = { type="scalar" path=["clouds_advance_wyspie_transition"] }
+	clouds_advance_local_density_end = { type="vector2" path=["clouds_advance_local_density_end"] }
+	clouds_advance_wyspie_start = { type="scalar" path=["clouds_advance_wyspie_start"] }
+	clouds_advance_curl_amplitude = { type="scalar" path=["clouds_advance_curl_amplitude"] }
+	clouds_advance_curl_frequency = { type="scalar" path=["clouds_advance_curl_frequency"] }
+
+	clouds_advance_altitude_cloud_map = { type="resource" path=["clouds_advance_altitude_cloud_map"] }
+	clouds_advance_altitude_cloud_scale = { type="vector2" path=["clouds_advance_altitude_cloud_scale"] }
+	clouds_advance_altitude_cloud_speed = { type="scalar" path=["clouds_advance_altitude_cloud_speed"] }
+	clouds_advance_altitude_cloud_coverage = { type="scalar" path=["clouds_advance_altitude_cloud_coverage"] }
+
+	clouds_advance_curl_speed = { type="scalar" path=["clouds_advance_curl_speed"] }
+	clouds_advance_coverage_speed = { type="scalar" path=["clouds_advance_coverage_speed"] }
+	clouds_advance_type_speed = { type="scalar" path=["clouds_advance_type_speed"] }
+	clouds_advance_wetness_speed = { type="scalar" path=["clouds_advance_wetness_speed"] }
+
+	clouds_advance_godray_decay = { type="scalar" path=["clouds_advance_godray_decay"]  }
+	clouds_advance_godray_density = { type="scalar" path=["clouds_advance_godray_density"]  }
+
+	clouds_advance_rain_threshold = { type="scalar" path=["clouds_advance_rain_threshold"]  }
+}

@@ -1,0 +1,15 @@
+shading_component_mapping = {
+	clouds_coverage = { type="scalar" path=["clouds_coverage"]  }
+	clouds_type = { type="scalar" path=["clouds_type"]  }
+	clouds_wetness = { type="scalar" path=["clouds_wetness"]  }
+	clouds_enable_weather = { type="scalar" path=["clouds_enable_weather"]  }
+	clouds_enable_scripted = { type="scalar" path=["clouds_enable_scripted"]  }
+	clouds_weather_map = { type="resource" path=["clouds_weather_map"] }
+
+	clouds_global_density = { type="scalar" path=["clouds_global_density"]  }
+	clouds_phase = { type="scalar" path=["clouds_phase"]  }
+	clouds_time = { type="scalar" path=["clouds_time"]  }
+	clouds_angle = { type="scalar" path=["clouds_angle"]  }
+	clouds_wind_speed = { type="scalar" path=["clouds_wind_speed"]  }
+	clouds_godray_weight = { type="scalar" path=["clouds_godray_weight"]  }
+}

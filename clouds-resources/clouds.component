@@ -1,0 +1,146 @@
+export = "#component"
+types = {
+    component = {
+        type = ":struct"
+        implements = {
+            "core/types/component" = true
+        }
+        fields = {
+            shading_environment_mapping = {
+                type = ":resource"
+                extension = "shading_environment_mapping"
+                default = {
+                    "$resource_name" = "clouds-resources/clouds"
+                    "$resource_type" = "shading_environment_mapping"
+                }
+                editor = {
+                    visible = false
+                }
+            }
+            clouds_coverage = {
+                type = ":number"
+                default = 0.6
+                min = 0.0
+                max = 1.0
+                editor = {
+                    label = "Coverage"
+                    step = 0.0001
+                }
+            }
+            clouds_type = {
+                type = ":number"
+                default = 0.75
+                min = 0.0
+                max = 1.0
+                editor = {
+                    label = "Cloud Type"
+                    step = 0.0001
+                }
+            }
+            clouds_wetness = {
+                type = ":number"
+                default = 0.0
+                min = 0.0
+                max = 1.0
+                editor = {
+                    label = "Wetness"
+                    step = 0.0001
+                }
+            }    
+            clouds_enable_weather = {
+                type = ":bool"
+                default = false
+                editor = {
+                    label = "Enable Weather"
+                }
+            }
+            clouds_enable_scripted = {
+                type = ":bool"
+                default = false
+                editor = {
+                    label = "Enable Scripted Weather"
+                }
+            }
+            clouds_weather_map = {
+                type = ":resource"
+                extension = "texture"
+                default = {
+                    "$resource_name" = "clouds-resources/weather_storm"
+                    "$resource_type" = "shading_environment_mapping"
+                }
+                editor = {
+                    label = "Weather Map"
+                }
+            }            
+            clouds_global_density = {
+                type = ":number"
+                default = 0.2
+                min = 0.01
+                max = 1.0
+                editor = {
+                    label = "Density"
+                    step = 0.0001
+                }
+            }            
+            clouds_phase = {
+                type = ":number"
+                default = 0.2
+                min = 0.0
+                max = 1.0
+                editor = {
+                    label = "Phase"
+                    step = 0.001
+                }
+            }
+            clouds_time = {
+                type = ":number"
+                default = 0.0
+                min = -1000.0
+                max = 1000.0
+                editor = {
+                    label = "Time"
+                    step = 0.0001
+                }
+            }
+            clouds_angle = {
+                type = ":number"
+                default = 0.0
+                min = 0.0
+                max = 6.28318530
+                editor = {
+                    label = "Wind Angle"
+                    step = 0.0001
+                }
+            }
+            clouds_wind_speed = {
+                type = ":number"
+                default = 0.1
+                min = 0.0
+                max = 4.0
+                editor = {
+                    label = "Wind Speed"
+                    step = 0.0001
+                }
+            }
+            clouds_godray_weight = {
+                type = ":number"
+                default = 0.05
+                min = 0.0
+                max = 1.0
+                editor = {
+                    label = "Godrays Weight"
+                    step = 0.0001
+                }
+            }
+        }
+        editor = {
+            category = "Clouds"
+            priority = 10
+            icon = "certificate"
+        }
+        metadata = {
+            component = "data"
+            tags = ["shading_environment"]
+        }
+    }
+}

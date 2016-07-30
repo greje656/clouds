@@ -1,0 +1,518 @@
+export = "#component"
+types = {
+    component = {
+        type = ":struct"
+        implements = {
+            "core/types/component" = true
+        }
+        fields = {
+            shading_environment_mapping = {
+                type = ":resource"
+                extension = "shading_environment_mapping"
+                default = {
+                    "$resource_name" = "clouds-resources/clouds_advance"
+                    "$resource_type" = "shading_environment_mapping"
+                }
+                editor = {
+                    visible = false
+                }
+            }
+            clouds_advance_ambient_top = {
+                type = ":number"
+                default = 0.05
+                min = 0.0
+                max = 0.5
+                editor = {
+                    label = "Ambient Top"
+                    step = 0.00001
+                }
+            }
+            clouds_advance_ambient_bottom = {
+                type = ":number"
+                default = 0.002
+                min = 0.0
+                max = 0.5
+                editor = {
+                    label = "Ambient Bottom"
+                    step = 0.00001
+                }
+            }
+            clouds_advance_scattering_color_blend = {
+                type = ":number"
+                default = 0.5
+                min = 0.0
+                max = 10.0
+                editor = {
+                    label = "Scattering Anti Color Blend"
+                    step = 0.001
+                }
+            }
+            clouds_advance_extinction_color1 = {
+                type = "core/types/color"
+                fields = {
+                    rgb = { default = [1.0, 1.0, 1.0] }
+                    alpha = { default = 1.0 }
+                    intensity = { default = 1.0 }
+                }
+                editor = {
+                    label = "Extinction Color Day"
+                }
+            }
+            clouds_advance_extinction_color2 = {
+                type = "core/types/color"
+                fields = {
+                    rgb = { default = [1.0, 0.3, 0.0] }
+                    alpha = { default = 1.0 }
+                    intensity = { default = 1.0 }
+                }
+                editor = {
+                    label = "Extinction Color Sunset"
+                }
+            }
+            clouds_advance_extinction_color3 = {
+                type = "core/types/color"
+                fields = {
+                    rgb = { default = [0.5, 0.6, 0.7] }
+                    alpha = { default = 1.0 }
+                    intensity = { default = 1.0 }
+                }
+                editor = {
+                    label = "Extinction Color Night"
+                }
+            }
+            clouds_advance_extinction_reducer = {
+                type = "core/types/range"
+                default = [1.0, 0.6]
+                value = {
+                    type = ":number"
+                    min = 0.0
+                    max = 1.0
+                    editor = {
+                        step = 0.0001
+                    }
+                }
+                editor = {
+                    label = "Top Exctinction Reducer (Dry/Wet)"
+                }
+            }
+            clouds_advance_extinction_distance = {
+                type = ":number"
+                default = 0.0
+                min = 0.0
+                max = 200.0
+                editor = {
+                    label = "Extinction Global Distance"
+                    step = 0.00001
+                }
+            }
+            clouds_advance_bottom_darkening_start = {
+                type = "core/types/range"
+                default = [0.5, 0.8]
+                value = {
+                    type = ":number"
+                    min = 0.0
+                    max = 1.0
+                    editor = {
+                        step = 0.0001
+                    }
+                }
+                editor = {
+                    label = "Bottom Darkening Start (Dry/Wet)"
+                }
+            }
+            clouds_advance_bottom_darkening = {
+                type = "core/types/range"
+                default = [0.2, 0.01]
+                value = {
+                    type = ":number"
+                    min = 0.0
+                    max = 1.0
+                    editor = {
+                        step = 0.0001
+                    }
+                }
+                editor = {
+                    label = "Bottom Darkening (Dry/Wet)"
+                }
+            }
+            clouds_advance_extinction = {
+                type = "core/types/range"
+                default = [1.0, 1.0]
+                value = {
+                    type = ":number"
+                    min = 0.0
+                    max = 10.0
+                    editor = {
+                        step = 0.0001
+                    }
+                }
+                editor = {
+                    label = "Extinction (Dry/Wet)"
+                }
+            }       
+            clouds_advance_extinction_near = {
+                type = "core/types/range"
+                default = [1.5, 4.0]
+                value = {
+                    type = ":number"
+                    min = 0.0
+                    max = 10.0
+                    editor = {
+                        step = 0.0001
+                    }
+                }
+                editor = {
+                    label = "Extinction Local (Dry/Wet)"
+                }
+            }
+            clouds_advance_extinction_far = {
+                type = "core/types/range"
+                default = [2.0, 2.0]
+                value = {
+                    type = ":number"
+                    min = 0.0
+                    max = 10.0
+                    editor = {
+                        step = 0.0001
+                    }
+                }
+                editor = {
+                    label = "Extinction Global (Dry/Wet)"
+                }
+            }
+            clouds_advance_extinction_color_blend = {
+                type = "core/types/range"
+                default = [1.0, 1.0]
+                value = {
+                    type = ":number"
+                    min = 0.0
+                    max = 1.0
+                    editor = {
+                        step = 0.0001
+                    }
+                }
+                editor = {
+                    label = "Extinction Blend (Dry/Wet)"
+                }
+            }
+            clouds_advance_scattering = {
+                type = "core/types/range"
+                default = [20, 5]
+                value = {
+                    type = ":number"
+                    min = 0.0
+                    max = 100.0
+                    editor = {
+                        step = 0.0001
+                    }
+                }
+                editor = {
+                    label = "Scattering(Dry/Wet)"
+                }
+            }
+            clouds_advance_extinction_color_scalar = {
+                type = "core/types/range"
+                default = [0.5, 0.05]
+                value = {
+                    type = ":number"
+                    min = 0.0
+                    max = 2.0
+                    editor = {
+                        step = 0.0001
+                    }
+                }
+                editor = {
+                    label = "Extinction Scalar (Dry/Wet)"
+                }
+            }
+            clouds_advance_powder_amount_near = {
+                type = "core/types/range"
+                default = [1.5, 1.0]
+                value = {
+                    type = ":number"
+                    min = 0.0
+                    max = 10.0
+                    editor = {
+                        step = 0.0001
+                    }
+                }
+                editor = {
+                    label = "Powder Near (Dry/Wet)"
+                }
+            }
+            clouds_advance_powder_amount_far = {
+                type = "core/types/range"
+                default = [1.5, 1.5]
+                value = {
+                    type = ":number"
+                    min = 0.0
+                    max = 10.0
+                    editor = {
+                        step = 0.0001
+                    }
+                }
+                editor = {
+                    label = "Powder Far (Dry/Wet)"
+                }
+            }
+            clouds_advance_powder_coef_near = {
+                type = "core/types/range"
+                default = [2.0, 2.0]
+                value = {
+                    type = ":number"
+                    min = 0.5
+                    max = 10.0
+                    editor = {
+                        step = 0.0001
+                    }
+                }
+                editor = {
+                    label = "Powder Coef Near (Dry/Wet)"
+                }
+            }
+            clouds_advance_powder_coef_far = {
+                type = "core/types/range"
+                default = [2.0, 2.0]
+                value = {
+                    type = ":number"
+                    min = 0.5
+                    max = 10.0
+                    editor = {
+                        step = 0.0001
+                    }
+                }
+                editor = {
+                    label = "Powder Coef Far (Dry/Wet)"
+                }
+            }
+            clouds_advance_local_density_end = {
+                type = "core/types/range"
+                default = [0.4, 0.2]
+                value = {
+                    type = ":number"
+                    min = 0.0
+                    max = 1.0
+                    editor = {
+                        step = 0.0001
+                    }
+                }
+                editor = {
+                    label = "Local Density End Pos (Dry/Wet)"
+                }
+            }
+            clouds_advance_wyspie_start = {
+                type = ":number"
+                default = 0.15
+                min = 0.0
+                max = 0.5
+                editor = {
+                    label = "Wyspie Start Pos"
+                    step = 0.0001
+                }
+            }
+            clouds_advance_wyspie_transition = {
+                type = ":number"
+                default = 0.3
+                min = 0.0
+                max = 1.0
+                editor = {
+                    label = "Wyspie Transition"
+                    step = 0.0001
+                }
+            }
+            clouds_advance_scale = {
+                type = ":number"
+                default = 0.12
+                min = 0.01
+                max = 0.5
+                editor = {
+                    label = "Cloud Scale"
+                    step = 0.0001
+                }
+            }
+            clouds_advance_erode_scale = {
+                type = ":number"
+                default = 9
+                min = 1.0
+                max = 20.0
+                editor = {
+                    label = "Erode Scale"
+                    step = 0.0001
+                }
+            }                      
+            clouds_advance_erode_low = {
+                type = "core/types/range"
+                default = [0.2, 0.3]
+                value = {
+                    type = ":number"
+                    min = 0.0
+                    max = 1.0
+                    editor = {
+                        step = 0.0001
+                    }
+                }
+                editor = {
+                    label = "Erode Low (Near/Far)"
+                }
+            }
+            clouds_advance_erode_high = {
+                type = "core/types/range"
+                default = [0.15, 0.15]
+                value = {
+                    type = ":number"
+                    min = 0.0
+                    max = 1.0
+                    editor = {
+                        step = 0.0001
+                    }
+                }
+                editor = {
+                    label = "Erode Low (Near/Far)"
+                }
+            }
+            clouds_advance_curl_amplitude = {
+                type = ":number"
+                default = 0.025
+                min = 0.0
+                max = 0.5
+                editor = {
+                    label = "Curl Amplitude"
+                    step = 0.00001
+                }
+            }
+            clouds_advance_curl_frequency = {
+                type = ":number"
+                default = 20.0
+                min = 0.0
+                max = 30.0
+                editor = {
+                    label = "Curl Frequency"
+                    step = 0.0001
+                }
+            }
+            clouds_advance_altitude_cloud_map = {
+                type = ":resource"
+                extension = "texture"
+                default = {
+                    "$resource_name" = "clouds-resources/cirrus"
+                    "$resource_type" = "shading_environment_mapping"
+                }
+                editor = {
+                    label = "High Altitude Clouds"
+                }
+            }
+            clouds_advance_altitude_cloud_scale = {
+                type = "core/types/range"
+                default = [2, 4]
+                value = {
+                    type = ":number"
+                    min = 1
+                    max = 10
+                }
+                editor = {
+                    label = "High Altitude Cloud Scale"
+                    step = 1
+                }
+            }
+           clouds_advance_altitude_cloud_speed = {
+                type = ":number"
+                default = 0.002
+                min = 0
+                max = 1
+                editor = {
+                    label = "High Altitude Cloud Speed"
+                    step = 0.01
+                }
+            }
+            clouds_advance_altitude_cloud_coverage = {
+                type = ":number"
+                default = 0.75
+                min = 0
+                max = 3
+                editor = {
+                    label = "High Altitude Cloud Coverage"
+                    step = 0.01
+                }
+            }
+            clouds_advance_curl_speed = {
+                type = ":number"
+                default = 1.0
+                min = 0.0
+                max = 4.0
+                editor = {
+                    label = "Turbulance Speed"
+                    step = 0.0001
+                }
+            }
+            clouds_advance_coverage_speed = {
+                type = ":number"
+                default = 2.0
+                min = 0.0
+                max = 20.0
+                editor = {
+                    label = "Coverage Speed"
+                    step = 0.0001
+                }
+            }
+            clouds_advance_type_speed = {
+                type = ":number"
+                default = 2.0
+                min = 0.0
+                max = 20.0
+                editor = {
+                    label = "Type Speed"
+                    step = 0.0001
+                }
+            }
+            clouds_advance_wetness_speed = {
+                type = ":number"
+                default = 1.0
+                min = 0.0
+                max = 20.0
+                editor = {
+                    label = "Wetness Speed"
+                    step = 0.0001
+                }
+            }
+            clouds_advance_godray_density = {
+                type = ":number"
+                default = 0.8
+                min = 0.0
+                max = 1.0
+                editor = {
+                    label = "Godrays Density"
+                    step = 0.0001
+                }
+            }
+            clouds_advance_godray_decay = {
+                type = ":number"
+                default = 0.9
+                min = 0.5
+                max = 1.0
+                editor = {
+                    label = "Godrays Decay"
+                    step = 0.0001
+                }
+            }
+            clouds_advance_rain_threshold = {
+                type = ":number"
+                default = 5.0
+                min = 0.0
+                max = 20.0
+                editor = {
+                    label = "Rain"
+                    step = 0.0001
+                }
+            }
+        }
+        editor = {
+            category = "Clouds (Advanced)"
+            priority = 11
+            icon = "certificate"
+        }
+        metadata = {
+            component = "data"
+            tags = ["shading_environment"]
+        }
+    }
+}

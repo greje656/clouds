@@ -1,0 +1,25 @@
+shading_component_mapping = {
+	sky_distance_scales_position = { type="scalar" path=["sky_distance_scales_position"] }
+	sky_distance_scales = { type="vector2" path=["sky_distance_scales"] }
+	sky_distance_scales_noise = { type="vector2" path=["sky_distance_scales_noise"] }
+	sky_distance_clouds_scale = { type="scalar" path=["sky_distance_clouds_scale"]  }
+	sky_fog_fade = { type="scalar" path=["sky_fog_fade"]  }
+	sky_horizon_offset = { type="scalar" path=["sky_horizon_offset"]  }
+	sky_turbidity = { type="scalar" path=["sky_turbidity"]  }
+	sky_rayleigh_coefficient = { type="scalar" path=["sky_rayleigh_coefficient"]  }
+	sky_luminance = { type="scalar" path=["sky_luminance"]  }
+	sky_mie_coefficient = { type="scalar" path=["sky_mie_coefficient"]  }
+	sky_mie_directional_g = { type="scalar" path=["sky_mie_directional_g"]  }
+	sky_sun_disk_scale = { type="scalar" path=["sky_sun_disk_scale"]  }
+	sky_night_color = { type="color" path={ rgb = ["sky_night_color", "rgb"] intensity = ["sky_night_color", "intensity"] } }
+	sky_night_moon_color = { type="color" path={ rgb = ["sky_night_moon_color", "rgb"] intensity = ["sky_night_moon_color", "intensity"] } }
+	sky_night_ambient_color = { type="color" path={ rgb = ["sky_night_ambient_color", "rgb"] intensity = ["sky_night_ambient_color", "intensity"] } }
+	sky_moon = { type="resource" path=["sky_moon"] }
+	sky_moon_disk_scale = { type="scalar" path=["sky_moon_disk_scale"]  }	
+	sky_moon_glow = { type="scalar" path=["sky_moon_glow"]  }	
+	sky_star_twinkle = { type="scalar" path=["sky_star_twinkle"]  }
+	sky_milkyway_rotation = { type="scalar" path=["sky_milkyway_rotation"]  }
+	sky_milkyway_density = { type="scalar" path=["sky_milkyway_density"]  }	
+	sky_stars_color1 = { type="color" path={ rgb = ["sky_stars_color1", "rgb"] intensity = ["sky_stars_color1", "intensity"] } }
+	sky_stars_color2 = { type="color" path={ rgb = ["sky_stars_color2", "rgb"] intensity = ["sky_stars_color2", "intensity"] } }
+}

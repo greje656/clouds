@@ -1,0 +1,278 @@
+export = "#component"
+types = {
+    component = {
+        type = ":struct"
+        implements = {
+            "core/types/component" = true
+        }
+        fields = {
+            shading_environment_mapping = {
+                type = ":resource"
+                extension = "shading_environment_mapping"
+                default = {
+                    "$resource_name" = "clouds-resources/sky"
+                    "$resource_type" = "shading_environment_mapping"
+                }
+                editor = {
+                    visible = false
+                }
+            }
+            sky_distance_scales_position = {
+                type = ":number"
+                default = 500.0
+                min = 0.01
+                max = 2000.0
+                editor = {
+                    label = "Scene Distance Scale Position"
+                    step = 1
+                }
+            }
+            sky_distance_scales = {
+                type = "core/types/range"
+                default = [200.0, 150.0]
+                value = {
+                    type = ":number"
+                    min = 0.01
+                    max = 400.0
+                    editor = {
+                        step = 1.0
+                    }
+                }
+                editor = {
+                    label = "Scene Distance Scale (Bottom/Top)"
+                }
+            }
+            sky_distance_scales_noise = {
+                type = "core/types/range"
+                default = [1.0, 1.0]
+                value = {
+                    type = ":number"
+                    min = 0.001
+                    max = 1.0
+                    editor = {
+                        step = 1.0
+                    }
+                }
+                editor = {
+                    label = "Scene Distance Noise (Scale/Amount)"
+                }
+            }
+            sky_distance_clouds_scale = {
+                type = ":number"
+                default = 0.5
+                min = 0.001
+                max = 20
+                editor = {
+                    label = "Clouds Distance Scale"
+                    step = 0.01
+                }
+            }
+            sky_fog_fade = {
+                type = ":number"
+                default = 20.0
+                min = 0.0
+                max = 200
+                editor = {
+                    label = "Fog Fade"
+                    step = 0.01
+                }
+            }
+            sky_horizon_offset = {
+                type = ":number"
+                default = 0.2
+                min = -0.5
+                max = 0.5
+                editor = {
+                    label = "Horizon Offset"
+                    step = 0.0001
+                }
+            }
+            sky_luminance = {
+                type = ":number"
+                default = 1.0
+                min = 0.0
+                max = 4
+                editor = {
+                    label = "Sky Luminance"
+                    step = 0.01
+                }
+            }
+            sky_turbidity = {
+                type = ":number"
+                default = 1.0
+                min = 0.0
+                max = 20
+                editor = {
+                    label = "Sky Turbidity"
+                    step = 0.1
+                }
+            }
+            sky_rayleigh_coefficient = {
+                type = ":number"
+                default = 0.8
+                min = 0.0
+                max = 10
+                editor = {
+                    label = "Sky Rayleigh"
+                    step = 0.001
+                }
+            }
+            sky_mie_coefficient = {
+                type = ":number"
+                default = 0.01
+                min = 0.0
+                max = 0.1
+                editor = {
+                    label = "Sky Mie Coefficient"
+                    step = 0.001
+                }
+            }
+            sky_mie_directional_g = {
+                type = ":number"
+                default = 0.95
+                min = 0.0
+                max = 1
+                editor = {
+                    label = "Sky Mie Directional G"
+                    step = 0.001
+                }
+            }
+            sky_sun_disk_scale = {
+                type = ":number"
+                default = 2.0
+                min = 0.0
+                max = 20
+                editor = {
+                    label = "Sun Disk Scale"
+                    step = 0.001
+                }
+            }
+            sky_night_color = {
+                type = "core/types/color"
+                fields = {
+                    rgb = { default = [0.005, 0.015, 0.02] }
+                    alpha = { default = 1.0 }
+                    intensity = { default = 0.2 }
+                }
+                editor = {
+                    label = "Night Sky Color"
+                }
+            }
+            sky_night_moon_color = {
+                type = "core/types/color"
+                fields = {
+                    rgb = { default = [0.635, 0.8, 1.0] }
+                    alpha = { default = 1.0 }
+                    intensity = { default = 0.5 }
+                }
+                editor = {
+                    label = "Night Moon Color"
+                }
+            }
+            sky_night_ambient_color = {
+                type = "core/types/color"
+                fields = {
+                    rgb = { default = [0.635, 0.8, 1.0] }
+                    alpha = { default = 1.0 }
+                    intensity = { default = 0.5 }
+                }
+                editor = {
+                    label = "Night Ambient Color"
+                }
+            }
+            sky_moon = {
+                type = ":resource"
+                extension = "texture"
+                default = {
+                    "$resource_name" = "clouds-resources/moon"
+                    "$resource_type" = "shading_environment_mapping"
+                }
+                editor = {
+                    label = "Moon"
+                }
+            }
+            sky_moon_glow = {
+                type = ":number"
+                default = 4.0
+                min = 0.0
+                max = 20.0
+                editor = {
+                    label = "Moon Glow Intensity"
+                    step = 0.001
+                }
+            }
+            sky_moon_disk_scale = {
+                type = ":number"
+                default = 5.0
+                min = 0.0
+                max = 30
+                editor = {
+                    label = "Moon Disk Scale"
+                    step = 0.001
+                }
+            }
+            sky_milkyway_rotation = {
+                type = ":number"
+                default = 0.8
+                min = 0.0
+                max = 1.0
+                editor = {
+                    label = "Milkyway Rotation"
+                    step = 0.001
+                }
+            }
+            sky_star_twinkle = {
+                type = ":number"
+                default = 0.5
+                min = 0.0
+                max = 2.0
+                editor = {
+                    label = "Twinkle"
+                    step = 0.001
+                }
+            }
+            sky_milkyway_density = {
+                type = ":number"
+                default = 2.0
+                min = 0.0
+                max = 2.5
+                editor = {
+                    label = "Milkyway Density"
+                    step = 0.001
+                }
+            }
+            sky_stars_color1 = {
+                type = "core/types/color"
+                fields = {
+                    rgb = { default = [1.0, 0.7, 0.75] }
+                    alpha = { default = 1.0 }
+                    intensity = { default = 10.0 }
+                }
+                editor = {
+                    label = "Stars Color 1"
+                }
+            }
+            sky_stars_color2 = {
+                type = "core/types/color"
+                fields = {
+                    rgb = { default = [0.65, 0.8, 1.0] }
+                    alpha = { default = 1.0 }
+                    intensity = { default = 10.0 }
+                }
+                editor = {
+                    label = "Stars Color 2"
+                }
+            }
+
+        }
+        editor = {
+            category = "Clouds Atmosphere"
+            priority = 12
+            icon = "certificate"
+        }
+        metadata = {
+            component = "data"
+            tags = ["shading_environment"]
+        }
+    }
+}

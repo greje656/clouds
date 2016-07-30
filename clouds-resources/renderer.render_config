@@ -1,0 +1,1342 @@
+// ----------------------------------------------------------------------------------------------------
+// Configures per platform render caps block
+compatible_with = "core/stingray_renderer/renderer"
+
+win_caps = {
+	feature_level = ""
+	use_deferred_contexts = false
+}
+
+osx_caps = {
+
+}
+
+ps4_caps = {
+	gnm_parallel_dispatch = true
+}
+
+ios_caps = {
+
+}
+
+android_caps = {
+
+}
+
+xb1_caps = {
+	use_deferred_contexts = false
+}
+
+webgl_caps = {
+
+}
+
+win64uwp_caps = {
+	feature_level = ""
+	use_deferred_contexts = false
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Configures render settings
+
+render_settings = {
+	sun_shadows = true
+	sun_shadow_map_size = [ 2048, 2048 ]
+	// Only on PC, PS4, XB1: medium == 4 tap PCF, high == 5x5 PCF
+	// Ignored on mobile
+	sun_shadow_map_filter_quality = "high"
+	local_lights_shadow_map_filter_quality = "high"
+
+	deferred_local_lights_cast_shadows = true
+	forward_local_lights_cast_shadows = true
+	local_lights_shadow_atlas_size = [ 2048, 2048 ]
+
+	particles_local_lighting = true
+	particles_receive_shadows = true
+	particles_tessellation = true
+	particles_cast_shadows = false
+
+	local_lights = true
+	fxaa_enabled = false
+	taa_enabled = true
+	motion_blur_enabled = true
+	// known limitation: if ao is disabled here it cannot be enabled in the shading environment
+	ao_enabled = true
+	dof_enabled = true
+	bloom_enabled = true
+	ssr_enabled = true
+	ssr_high_quality = false
+	lens_quality_enabled = true
+	color_grading_enabled = true
+	post_effects_enabled = true
+	clouds_enabled = true
+
+	capture_cubemap = false
+
+	debug_rendering = false
+	debug_taa = false
+	gbuffer_albedo_visualization = false
+	gbuffer_normal_visualization = false
+	gbuffer_reconstructed_normal_visualization = false
+	gbuffer_roughness_visualization = false
+	gbuffer_specular_visualization = false
+	gbuffer_metallic_visualization = false
+	gbuffer_ambient_diffuse_visualization = false
+	gbuffer_sun_shadow_visualization = false
+	gbuffer_velocity_visualization = false
+	gbuffer_ao_visualization = false
+	gbuffer_material_ao_visualization = false
+	gbuffer_ssao_visualization = false
+	gbuffer_density_visualization = false
+	bloom_visualization = false
+	ssr_visualization = false
+
+	debug_baker = false
+	baker_materials_visualization = false
+	baker_full_visualization = false
+
+	taa_stable_depth_visualization = false
+	taa_ao_lerp_visualization = false
+	taa_hdr0_lerp_visualization = false
+	taa_hdr0_clamp_visualization = false
+	taa_hdr0_jitter_visualization = false
+
+	dof_visualization = false
+	ssr_mask_visualization = false
+	shadow_cascade_visualization = false
+	shadow_atlas_visualization = false
+	sun_shadow_map_visualization = false
+	shadow_mask_visualization = false
+
+	clouds_raw_data_visualization = false
+	clouds_weather_data_visualization = false
+	auto_exposure_visualization = false
+
+	// only valid on windows in development mode. 
+	baker_filter_lightmap = true
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Setup predefined shader pass flags, all flags prefixed with dev_ are used by the tools
+
+shader_pass_flags = [
+	"dev_selection"
+	"dev_volume_visualization"
+	"dev_lightmap_texel_visualization"
+]
+
+// ---------------------------------------------------------------------------------------------------
+// This section contains mapping information for importing different kinds of materials/shaders
+shader_import = {
+	fbx = {
+		default = "core/stingray_renderer/shader_import/standard"
+	}
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Specifies which shader libraries to load at boot up.
+
+shader_libraries = [
+	"core/stingray_renderer/shader_libraries/default_shaders"
+	"core/stingray_renderer/shader_libraries/development"
+	"core/stingray_renderer/shader_libraries/lighting"
+	"core/stingray_renderer/shader_libraries/post_processing"
+	"core/stingray_renderer/shader_libraries/placeholders"
+	"core/stingray_renderer/shader_libraries/fxaa"
+	"core/stingray_renderer/shader_libraries/particle_billboard"
+	"core/stingray_renderer/shader_libraries/terrain_utilities"
+	"core/stingray_renderer/shader_libraries/path_tracing"
+	"clouds-resources/clouds"
+]
+
+// Mapping between between default shaders needed by the engine and their implementation in data.
+// By default these shaders are implemented in the core/stingray_renderer/default_shaders library
+default_shaders = {
+	// If boot ini-file configures the engine to not crash on missing shaders, the missing_shader will be used as a replacement shader
+	missing_shader = "missing_shader"
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Specifies global resources to allocate at start up
+
+global_resources = [
+	{ type="static_branch" platforms=["ios" "android", "webgl"]
+		pass = [
+			{ name="output_target" type="render_target" depends_on="back_buffer" format="R8G8B8A8" }
+		]
+		fail = [
+			{ name="output_target" type="alias" aliased_resource="back_buffer" }
+		]
+	}
+
+	// Regular depth stencil surface
+	{ name="depth_stencil_buffer" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="DEPTH_STENCIL" }
+	{ name="depth_stencil_buffer_selection" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="DEPTH_STENCIL" }
+	{ name="stable_depth_stencil_buffer" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="DEPTH_STENCIL" }
+
+	{ type="static_branch" render_settings={ taa_enabled=true } platforms=["win", "ps4", "xb1", "win64uwp"]
+		pass = [
+			{ name="stable_depth_stencil_buffer_alias" type="alias" aliased_resource="stable_depth_stencil_buffer" }
+		]
+		fail = [
+			{ name="stable_depth_stencil_buffer_alias" type="alias" aliased_resource="depth_stencil_buffer" }
+		]
+	}
+
+	// G-buffer targets
+	{ name="gbuffer0" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R8G8B8A8" }
+	{ type="static_branch" platforms=["win", "ps4", "xb1", "win64uwp"]
+		pass = [
+			// Will move to smarter g-buffer encoding of normals but for now we'll just keep them in half precision on PC
+			{ name="gbuffer1" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R16G16B16A16F" }
+			// Need hi precision motion vectors on high-end platforms
+			{ name="gbuffer2" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R16G16B16A16F" }
+		]
+		fail = [
+			{ name="gbuffer1" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R8G8B8A8" }
+			{ name="gbuffer2" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R8G8B8A8" }
+		]
+	}
+	{ name="gbuffer3" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R8G8B8A8" }
+
+	// Render target containing linear depth, populated by the linearize_depth pass
+	{ type="static_branch" platforms=["win", "ps4", "xb1", "win64uwp"]
+		pass = [
+			{ name="linear_depth" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R32F" }
+			{ name="hiz_depth" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 mip_levels=11 format="R32F" }
+		]
+		fail = [
+			{ name="linear_depth" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R32UNORM" }
+		]
+	}
+
+	// Shadow map for cascaded shadow mapping from sun light
+	{ type="static_branch" render_settings={ sun_shadows = true }
+		pass = [
+			{ name="sun_shadow_map" type="render_target" size_from_render_setting="sun_shadow_map_size" format="DEPTH_STENCIL" }
+		]
+	}
+	{ type="static_branch" render_settings={ deferred_local_lights_cast_shadows = true }
+		pass = [
+			{ name="local_lights_shadow_atlas" type="render_target" size_from_render_setting="local_lights_shadow_atlas_size" format="DEPTH_STENCIL" }
+		]
+	}
+	{ name="ldr0" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R8G8B8A8" }
+
+	{ type = "static_branch" render_caps={ development=true }
+		pass = [
+			{ name="ldr1_dev_r" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R8" }
+			{ name="hdr0_dev_r" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R16G16B16A16F" }
+
+		]
+	}
+
+	// Main light accumulation target
+	{ name="hdr0" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R16G16B16A16F" }
+	{ name="hdr0_history0" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R16G16B16A16F" }
+	{ name="hdr0_div10" type="render_target" depends_on="output_target" w_scale=0.1 h_scale=0.1 format="R16G16B16A16F" }
+	{ name="hdr1" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R16G16B16A16F" }
+	{ name="hdr2" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R16G16B16A16F" }
+	{ name="hdr2_div2" type="render_target" depends_on="output_target" w_scale=0.5 h_scale=0.5 format="R16G16B16A16F" }
+
+	// Bloom resources
+	{ name="hdr0_div2" type="render_target" depends_on="output_target" w_scale=0.5 h_scale=0.5 format="R16G16B16A16F" }
+	{ name="hdr1_div2" type="render_target" depends_on="output_target" w_scale=0.5 h_scale=0.5 format="R16G16B16A16F" }
+	{ name="hdr0_div4" type="render_target" depends_on="output_target" w_scale=0.25 h_scale=0.25 format="R16G16B16A16F" }
+	{ name="hdr1_div4" type="render_target" depends_on="output_target" w_scale=0.25 h_scale=0.25 format="R16G16B16A16F" }
+	{ name="hdr0_div16" type="render_target" depends_on="output_target" w_scale=0.0625 h_scale=0.0625 format="R16G16B16A16F" }
+	{ name="hdr1_div16" type="render_target" depends_on="output_target" w_scale=0.0625 h_scale=0.0625 format="R16G16B16A16F" }
+	{ name="hdr0_div64" type="render_target" depends_on="output_target" w_scale=0.015625 h_scale=0.015625 format="R16G16B16A16F" }
+	{ name="hdr1_div64" type="render_target" depends_on="output_target" w_scale=0.015625 h_scale=0.015625 format="R16G16B16A16F" }
+	{ name="hdr0_div256" type="render_target" depends_on="output_target" w_scale=0.00390625 h_scale=0.00390625 format="R16G16B16A16F" }
+	{ name="hdr1_div256" type="render_target" depends_on="output_target" w_scale=0.00390625 h_scale=0.00390625 format="R16G16B16A16F" }
+
+	// Depth of Field resources
+	{ type="static_branch" platforms=["win", "ps4", "xb1", "win64uwp", "webgl"]
+		pass = [
+			{ name="ldr1_r" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R8" }
+			{ name="ldr1" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R8G8B8A8" }
+			{ name="ldr2" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R8G8B8A8" }
+		]
+	}
+
+	// High-end platforms resources
+	{ type="static_branch" platforms=["win", "ps4", "xb1", "win64uwp"]
+		pass = [
+			{ type="static_branch" render_settings={ ssr_high_quality=true }
+				pass = [
+					{ name="hdr0_div2_mip6" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 mip_levels=6 format="R16G16B16A16F" }
+					{ name="hdr1_div2_mip6" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 mip_levels=6 format="R16G16B16A16F" }
+					{ name="ldr4_div2" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R8" }
+					{ name="hdr3_div2" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R16G16B16A16F" }
+				]
+				fail = [
+					{ name="hdr0_div2_mip6" type="render_target" depends_on="output_target" w_scale=0.5 h_scale=0.5 mip_levels=6 format="R16G16B16A16F" }
+					{ name="hdr1_div2_mip6" type="render_target" depends_on="output_target" w_scale=0.5 h_scale=0.5 mip_levels=6 format="R16G16B16A16F" }
+					{ name="ldr4_div2" type="render_target" depends_on="output_target" w_scale=0.5 h_scale=0.5 format="R8" }
+					{ name="hdr3_div2" type="render_target" depends_on="output_target" w_scale=0.5 h_scale=0.5 format="R16G16B16A16F" }
+				]
+			}
+
+			{ type="static_branch" platforms=["win"]
+				pass = [
+					{ name="ldr1_div2_rg" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R8G8" }
+					{ name="ldr2_div2_r" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R8" }
+					{ name="ldr3_div2_r" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R8" }
+					{ name="linear_depth_div2" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 mip_levels=6 format="R32F" }
+				]
+				fail = [
+					{ name="ldr1_div2_rg" type="render_target" depends_on="output_target" w_scale=0.5 h_scale=0.5 format="R8G8" }
+					{ name="ldr2_div2_r" type="render_target" depends_on="output_target" w_scale=0.5 h_scale=0.5 format="R8" }
+					{ name="ldr3_div2_r" type="render_target" depends_on="output_target" w_scale=0.5 h_scale=0.5 format="R8" }
+					{ name="linear_depth_div2" type="render_target" depends_on="output_target" w_scale=0.5 h_scale=0.5 mip_levels=6 format="R32F" }
+				]
+			}
+
+			{ name="hdr3_rg" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R16G16F" }
+			{ name="hdr0_rg_w_div10" type="render_target" depends_on="output_target" w_scale=0.1 h_scale=1 format="R16G16F" }
+			{ name="hdr1_rg_div10" type="render_target" depends_on="output_target" w_scale=0.1 h_scale=0.1 format="R16G16F" }
+
+			{ type="static_branch" render_settings={ clouds_enabled=true }
+				pass = [
+					// Clouds modelling resources:
+					{ name="clouds_result_texture1" type="render_target" image_type="image_3d" width=256 height=256 layers=256 format="R8G8B8A8" }
+					{ name="clouds_result_texture2" type="render_target" image_type="image_3d" width=64 height=64 layers=64 format="R8G8B8A8" }
+					{ name="clouds_result_texture3" type="render_target" image_type="image_2d" width=128 height=128 format="R8G8B8A8" }
+					{ name="clouds_weather_texture" type="render_target" image_type="image_2d" width=256 height=256 format="R8G8B8A8" }
+
+					// Clouds rendering resources:
+					{ name="clouds_buffer" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R16G16B16A16F" }
+					{ name="clouds_buffer_low_res" type="render_target" depends_on="output_target" w_scale=0.25 h_scale=0.25 format="R16G16B16A16F" }
+					{ name="clouds_motion_vectors" type="render_target" depends_on="output_target" w_scale=0.25 h_scale=0.25 format="R16G16F" }
+					{ name="clouds_atmosphere" type="render_target" depends_on="output_target" w_scale=0.25 h_scale=0.25 format="R16G16B16A16F" }
+					{ name="clouds_godrays" type="render_target" depends_on="output_target" w_scale=0.5 h_scale=0.5 format="R16G16B16A16F" }
+					{ name="clouds_history_buffer" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R16G16B16A16F" }
+				]
+			}
+		]
+	}
+
+	// Targets only present during development on authoring platforms
+	{ type="static_branch" platforms=["win", "win64uwp"] render_caps={ development = true }
+		pass = [
+			{ name="cubemap_result" type="render_target" width=256 height=256 format="R16G16B16A16F" }
+		]
+	}
+
+	{ name="brdf_lut" type="texture" resource="core/stingray_renderer/lookup_tables/ibl_brdf_lut" }
+	{ name="noise" type="texture" resource="core/stingray_renderer/lookup_tables/noise" }
+]
+
+// ---------------------------------------------------------------------------------------------------
+// Layer configurations
+
+layer_configs = {
+	default = [
+		{ resource_generator="esram_allocation" }
+
+		// Kick resource generator for rendering all shadow maps
+		{ name="shadow_mapping" resource_generator="shadow_mapping" profiling_scope="shadow mapping" }
+
+		{ resource_generator="clustered_shading" profiling_scope="clustered shading" }
+
+		// Clear DST & gbuffer2
+		{ render_targets=["gbuffer2", "hdr0"] depth_stencil_target="depth_stencil_buffer" clear_flags=["SURFACE", "DEPTH", "STENCIL"] profiling_scope="clears" }
+		{ render_targets=["hdr1"] clear_flags=["SURFACE"] profiling_scope="clears" }
+
+		{ type="static_branch" platforms=["win", "xb1", "ps4", "win64uwp"]
+			pass = [
+				{ render_targets=["histogram"] clear_flags=["SURFACE"] profiling_scope="clears" }
+			]
+		}
+
+		// Base g-buffer layer, bulk of all materials renders into this
+		{ name="gbuffer" render_targets=["gbuffer0", "gbuffer1", "gbuffer2", "gbuffer3"] depth_stencil_target="depth_stencil_buffer" sort="FRONT_BACK" profiling_scope="gbuffer" }
+
+		// Resolve & linearize depth
+		{ resource_generator="stabilize_and_linearize_depth" profiling_scope="linearize_depth" }
+
+		// Decals
+		{ name="decals" render_targets=["gbuffer0" "gbuffer1"] depth_stencil_target="depth_stencil_buffer" profiling_scope="decal" sort="EXPLICIT" max_resolve_count=1 }
+
+		// Build motion vectors
+		{ type="static_branch" platforms=["win", "xb1", "ps4", "win64uwp"]
+			pass = [
+				{ resource_generator="generate_motion_vectors" profiling_scope="motion vectors" }
+			]
+		}
+
+		// Layer for localized reflection probes
+		{ name="reflections" render_targets=["hdr1"] depth_stencil_target="depth_stencil_buffer" sort="FRONT_BACK" profiling_scope="reflections probes" }
+
+		// ssr
+		{ type="static_branch" platforms=["win", "xb1", "ps4", "win64uwp"]
+			pass = [
+				{ resource_generator="ssr_reflections" profiling_scope="ssr" }
+			]
+		}
+
+		// Kick main scene lighting
+		{ resource_generator="lighting" profiling_scope="lighting" }
+
+		// Add emissive
+		{ name="emissive" render_targets=["hdr0"] depth_stencil_target="depth_stencil_buffer" sort="FRONT_BACK" profiling_scope="emissive" }
+
+		// Kick debug visualization
+		{ type="static_branch" render_caps={ development=true }
+			pass=[
+				{ resource_generator="debug_visualization" profiling_scope="debug_visualization" }
+			]
+		}
+
+		// Render Clouds
+		{ type="static_branch" render_settings={ clouds_enabled=true }
+			pass = [
+				{ resource_generator="clouds_modifier" profiling_scope="clouds" }
+			]
+			fail = [
+				{ resource_generator="fog" profiling_scope="fog" } 
+
+				// Skydome rendered directly into light accumulation
+				{ name="skydome" render_targets=["hdr0"] depth_stencil_target="depth_stencil_buffer" sort="BACK_FRONT" profiling_scope="skydome" }
+			]
+		}
+
+		// HDR transparency layer
+		{ name="hdr_transparent" render_targets=["hdr0"] depth_stencil_target="depth_stencil_buffer" sort="BACK_FRONT" profiling_scope="hdr_transparent" max_resolve_count=1 }
+		{ name="hdr_transparent_distortion" render_targets=["hdr0"] depth_stencil_target="depth_stencil_buffer" sort="BACK_FRONT" profiling_scope="hdr_transparent_distortion" max_resolve_count=1 }
+
+		{ resource_generator="stream_capture_buffers" profiling_scope="stream_capture" }
+
+		// Cube map capturing point, only present during development on authoring platforms
+		{ type="static_branch" platform=["win", "win64uwp"] render_caps={ development=true }
+			pass = [
+				{ resource_generator="cubemap_capture" }
+			]
+		}
+
+		{ type="static_branch" platforms=["win", "ps4", "xb1", "win64uwp"]
+			pass = [
+				{ type = "static_branch" render_caps={ development=true }
+					pass = [
+						{ name="selection" render_targets=["gbuffer0" "ldr1_dev_r"] depth_stencil_target="depth_stencil_buffer_selection" sort="BACK_FRONT" clear_flags=["SURFACE" "DEPTH"] profiling_scope="selection"}
+					]
+				}
+			]
+		}
+
+		// Kick post processing
+		{ resource_generator="post_processing" profiling_scope="post_processing" }
+
+		{ type="static_branch" platforms=["win", "win64uwp"]
+			pass = [
+				{ resource_generator="fxaa" profiling_scope="fxaa" }
+			]
+		}
+
+		// LDR transparency layer, primarily used for rendering HUD
+		{ name="transparent" render_targets=["output_target"] depth_stencil_target="stable_depth_stencil_buffer_alias" sort="BACK_FRONT" profiling_scope="transparent" }
+
+		{ type="static_branch" render_caps={ development=true }
+			pass = [
+				{ resource_generator="debug_shadows" profiling_scope="debug_shadows" }
+			]
+		}
+
+		{ name = "scaleformstudio_plugin" resource_generator="scaleformstudio_plugin" profiling_scope="scaleformstudio_plugin"}
+
+		{ type="static_branch" platforms=["ios" "android", "webgl"]
+			pass = [
+				// Invalidate buffers to avoid buffer loads with unneeded data
+				{ render_targets=["gbuffer0", "gbuffer1", "gbuffer2"] depth_stencil_target="depth_stencil_buffer" invalidate_targets=true profiling_scope="invalidate targets" }
+				{ render_targets=["gbuffer3", "hdr0", "linear_depth"] invalidate_targets=true profiling_scope="invalidate targets" }
+			]
+		}
+
+		{ resource_generator="esram_discard" }
+	]
+
+	// reserved name for debug world rendering
+	stingray_debug = [
+		{ name="transparent" render_targets=["output_target"] depth_stencil_target="depth_stencil_buffer" sort="BACK_FRONT" profiling_scope="stingray_debug" }
+	]
+}
+
+// ---------------------------------------------------------------------------------------------------
+// A special type of layer configuration that gets executed just before it's time to present a swap chain, this is useful
+// for doing any kind of final frame processing
+present = [
+	{ type="static_branch" platforms=["ios" "android", "webgl"]
+		pass = [
+			{ resource_generator="gl_present" profiling_scope="present" }
+		]
+	}
+]
+
+
+// ---------------------------------------------------------------------------------------------------
+// resource generators
+
+resource_generators = {
+	stream_capture_buffers = {
+		modifiers = [
+			{ type="stream_capture" name="color" capture_target="back_buffer" }
+			{ type="stream_capture" name="depth" capture_target="linear_depth" }
+			{ type="stream_capture" name="hdr0" capture_target="hdr0" }
+			{ type="stream_capture" name="normals" capture_target="gbuffer1" }
+		]
+	}
+
+	gl_present = {
+		modifiers = [
+			{ type="fullscreen_pass" shader="copy:FLIP_Y" input=["output_target"] output=["back_buffer"] }
+		]
+	}
+
+	debug_shadows = {
+		modifiers = [
+			{ type="dynamic_branch" render_settings={ shadow_atlas_visualization=true }
+				pass = [
+					{ type="fullscreen_pass" shader="copy" input=["local_lights_shadow_atlas"] output=["output_target"] dest_rect=[0.0, 0.5, 0.5, 0.5] }
+				]
+			}
+			{ type="dynamic_branch" render_settings={ shadow_cascade_visualization=true }
+				pass = [
+					{ type="fullscreen_pass" shader="copy" input=["sun_shadow_map"] output=["output_target"] dest_rect=[0.0, 0.5, 0.5, 0.5] }
+				]
+			}
+			{ type="dynamic_branch" render_settings={ sun_shadow_map_visualization=true }
+				pass = [
+					{ type="fullscreen_pass" shader="copy" input=["sun_shadow_map"] output=["output_target"] dest_rect=[0.0, 0.5, 0.5, 0.5] }
+				]
+			}
+		]
+	}
+
+	debug_visualization = {
+		modifiers = [
+			{ type="dynamic_branch" render_settings={ debug_rendering=true }
+				pass = [
+					{ type="dynamic_branch"  render_settings={ gbuffer_albedo_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="gbuffer_debug:ALBEDO_VISUALIZATION" output=["output_target"] }
+						]
+					}
+					{ type="dynamic_branch" render_settings={ gbuffer_normal_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="gbuffer_debug:NORMAL_VISUALIZATION" output=["output_target"] }
+						]
+					}
+					{ type="dynamic_branch" render_settings={ gbuffer_reconstructed_normal_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="gbuffer_debug:RECONSTRUCTED_NORMAL_VISUALIZATION" output=["output_target"] }
+						]
+					}
+					{ type="dynamic_branch" render_settings={ gbuffer_roughness_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="gbuffer_debug:ROUGHNESS_VISUALIZATION" output=["output_target"] }
+						]
+					}
+					{ type="dynamic_branch" render_settings={ gbuffer_specular_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="gbuffer_debug:SPECULAR_VISUALIZATION" output=["output_target"] }
+						]
+					}
+					{ type="dynamic_branch" render_settings={ gbuffer_metallic_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="gbuffer_debug:METALLIC_VISUALIZATION" output=["output_target"] }
+						]
+					}
+					{ type="dynamic_branch" render_settings={ gbuffer_sun_shadow_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="gbuffer_debug:SUN_SHADOW_VISUALIZATION" output=["output_target"] }
+						]
+					}
+					{ type="dynamic_branch" render_settings={ gbuffer_velocity_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="gbuffer_debug:VELOCITY_VISUALIZATION" output=["output_target"] }
+						]
+					}
+					{ type="dynamic_branch" render_settings={ gbuffer_ao_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="gbuffer_debug:AO_VISUALIZATION" output=["output_target"] }
+						]
+					}
+					{ type="dynamic_branch" render_settings={ gbuffer_material_ao_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="gbuffer_debug:MATERIAL_AO_VISUALIZATION" output=["output_target"] }
+						]
+					}
+					{ type="dynamic_branch" render_settings={ gbuffer_ssao_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="gbuffer_debug:SSAO_VISUALIZATION" output=["output_target"] }
+						]
+					}
+					{ type="dynamic_branch" render_settings={ gbuffer_density_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="gbuffer_debug:DENSITY_VISUALIZATION" output=["output_target"] }
+						]
+					}
+
+					{ type="fullscreen_pass" shader="gbuffer_debug:FILL_UNTOUCHED_PIXELS" output=["output_target"] depth_stencil_target="depth_stencil_buffer" }
+				]
+			}
+		]
+	}
+
+	clustered_shading = {
+		modifiers = [
+			{ type="clustered_shading"
+				buffers = [
+					{ name="cs_cluster_buffer" width=30 height=17 layers=16 content="cluster_data" }
+					{ name="cs_light_index_buffer" width=2048 height=4 content="light_index" }
+					{ name="cs_light_data_buffer" width=2048 height=4 content="light_data" }
+					{ name="cs_light_shadow_matrices_buffer" width=2048 height=5 content="light_shadow_matrices" }
+				]
+				cluster_max_depth=500.0
+				atlased_shadow_mapping_modifier="local_shadows"
+				registry_name="clustered_shading"
+			}
+		]
+	}
+
+	shadow_mapping = {
+		modifiers = [
+			{ type="find_global_light" write_found="sun_enabled" write_color="sun_color" write_direction="sun_direction" write_shadows_enabled="sun_shadows_enabled" write_shadow_depth_bias="sun_shadow_depth_bias" }
+
+			// Render 4 slices cascaded shadow map from sun light if sun_shadows == true
+			{ type="dynamic_branch" render_settings={ sun_shadows=true } shading_environment={ sun_shadows_enabled=true }
+				pass = [
+					{ type="cascaded_shadow_mapping" profiling_scope="cascaded_shadow_mapping" light_direction="sun_direction" padding=2 user_shadow_depth_bias = "sun_shadow_depth_bias"
+						slices = [
+							{ depth_range="sun_shadow_slice_depth_ranges" viewport=[0.000001 0.000001 0.5 0.5] output="sun_shadow_map" cutter_material="shadow_cutter_slice0" mask_material="global_shadow_mask_slice0" expose_world_to_shadow="sun_world_to_shadow_slice0" expose_vp_min="vp_min_slice0" expose_vp_max="vp_max_slice0" expose_scale="shadow_scale_slice0" expose_bias="shadow_bias_slice0" expose_shadow_depth_bias="shadow_depth_bias_slice0" expose_rotation="shadow_rotation" clear=true }
+							{ depth_range="sun_shadow_slice_depth_ranges" viewport=[0.5 0.000001 0.5 0.5] output="sun_shadow_map" cutter_material="shadow_cutter_slice1" mask_material="global_shadow_mask_slice1" expose_world_to_shadow="sun_world_to_shadow_slice1" expose_vp_min="vp_min_slice1" expose_vp_max="vp_max_slice1" expose_scale="shadow_scale_slice1" expose_bias="shadow_bias_slice1" expose_shadow_depth_bias="shadow_depth_bias_slice1" clear=false }
+							{ depth_range="sun_shadow_slice_depth_ranges" viewport=[0.000001 0.5 0.5 0.5] output="sun_shadow_map" cutter_material="shadow_cutter_slice2" mask_material="global_shadow_mask_slice2" expose_world_to_shadow="sun_world_to_shadow_slice2" expose_vp_min="vp_min_slice2" expose_vp_max="vp_max_slice2" expose_scale="shadow_scale_slice2" expose_bias="shadow_bias_slice2" expose_shadow_depth_bias="shadow_depth_bias_slice2" clear=false }
+							{ depth_range="sun_shadow_slice_depth_ranges" viewport=[0.5 0.5 0.5 0.5] output="sun_shadow_map" cutter_material="shadow_cutter_slice3" mask_material="global_shadow_mask_slice3" expose_world_to_shadow="sun_world_to_shadow_slice3" expose_vp_min="vp_min_slice3" expose_vp_max="vp_max_slice3" expose_scale="shadow_scale_slice3" expose_bias="shadow_bias_slice3" expose_shadow_depth_bias="shadow_depth_bias_slice3" clear=false}
+						]
+					}
+				]
+			}
+
+			{ type="static_branch" platforms=["xb1"]
+				pass = [
+					{ type="esram_control"
+						actions = [
+							{ resolve=["sun_shadow_map"] }
+						]
+					}
+				]
+			}
+
+			{ type="dynamic_branch" render_settings={ deferred_local_lights_cast_shadows=true }
+				pass = [
+					{ type="atlased_shadow_mapping" min_max_resolution=[128, 512] output="local_lights_shadow_atlas" clear=true registry_name="local_shadows" padding=2 }
+				]
+			}
+		]
+	}
+
+	esram_allocation = {
+		modifiers = [
+			{ type="static_branch" platforms=["xb1"]
+				pass = [
+					{ type="esram_control"
+						actions = [
+							{ allocate=["depth_stencil_buffer", "sun_shadow_map"] }
+						]
+					}
+				]
+			}
+		]
+	}
+
+	esram_discard = {
+		modifiers = [
+			{ type="static_branch" platforms=["xb1"]
+				pass = [
+					{ type="esram_control"
+						actions = [
+							{ discard=["depth_stencil_buffer", "sun_shadow_map", "hdr0"] }
+							{ memory_garbage_collect=true }
+						]
+					}
+				]
+			}
+		]
+	}
+
+	stabilize_and_linearize_depth = {
+		modifiers = [
+			{ type="static_branch" platforms=["win", "ps4", "xb1", "win64uwp"]
+				pass = [
+					{ type="dynamic_branch" render_settings={ taa_enabled=true }
+						pass = [
+							// Stabilize depth buffer (using the selection depth buffer as a temporary buffer to copy the depth history)
+							{ type="fullscreen_pass" shader="temporal_aa_depth" input=["depth_stencil_buffer" "stable_depth_stencil_buffer_alias" "hdr3_rg"] depth_stencil_target="depth_stencil_buffer_selection" }
+							{ type="fullscreen_pass" shader="copy_depth" input=["depth_stencil_buffer_selection"] depth_stencil_target="stable_depth_stencil_buffer_alias" }
+						]
+					}
+				]
+			}
+			// Linearize clip-space depth and store in linear_depth target
+			{ type="fullscreen_pass" shader="linearize_depth" input=["depth_stencil_buffer"] output=["linear_depth"] }
+		]
+	}
+
+	generate_motion_vectors = {
+		modifiers = [
+			// Build and merge the skydome motion vectors
+			{ type="fullscreen_pass" shader="merge_skydome_motion_vectors" input=["depth_stencil_buffer" "gbuffer2"] output=["hdr3_rg"] }
+		]
+	}
+
+	clouds_modifier = {
+		modifiers = [
+			{ type="dynamic_branch" shading_environment={ clouds_enable_weather=true }
+				pass = [
+					{ type="dynamic_branch" shading_environment={ clouds_enable_scripted=true }
+						pass = [
+							{ type="fullscreen_pass" shader="generate_weather_data:SCRIPTED" output=["clouds_weather_texture"] profiling_scope="clouds_weather" }
+						] fail = [
+							{ type="fullscreen_pass" shader="generate_weather_data:RANDOM" output=["clouds_weather_texture"] profiling_scope="clouds_weather" }
+						]
+					}
+
+					{ type="fullscreen_pass" shader="raymarch_clouds:SAMPLE_WEATHER_DATA" input=["clouds_result_texture1" "clouds_result_texture2" "clouds_result_texture3" "clouds_weather_texture"] output=["clouds_buffer_low_res" "clouds_motion_vectors"] profiling_scope="clouds_raymarch" }
+
+				] fail = [
+					{ type="fullscreen_pass" shader="raymarch_clouds" input=["clouds_result_texture1" "clouds_result_texture2" "clouds_result_texture3" "clouds_weather_texture"] output=["clouds_buffer_low_res" "clouds_motion_vectors"] profiling_scope="clouds_raymarch" }
+				]
+			}
+			{ type="fullscreen_pass" shader="reproject_clouds" input=["clouds_buffer_low_res" "clouds_history_buffer" "clouds_motion_vectors"] output=["clouds_buffer"] profiling_scope="clouds_reprojec" }
+			{ type="fullscreen_pass" shader="generate_atmosphere" input=["clouds_buffer" "depth_stencil_buffer"] output=["clouds_atmosphere"] }
+			{ type="fullscreen_pass" shader="generate_godrays" input=["clouds_atmosphere"] output=["clouds_godrays"] }
+			{ type="fullscreen_pass" shader="merge_clouds_with_scene" input=["hdr0" "depth_stencil_buffer" "clouds_buffer" "clouds_godrays"  "clouds_result_texture1"] output=["hdr0"] }
+			{ type="fullscreen_pass" shader="copy" input=["clouds_buffer"] output=["clouds_history_buffer"]  profiling_scope="clouds_copy" }
+		]
+	}
+
+	ssr_reflections = {
+		modifiers = [
+			{ type="dynamic_branch" render_settings={ ssr_enabled=true } shading_environment={ ssr_enabled=true } 
+				pass = [
+					// Build the hi-z structure
+					{ type="fullscreen_pass" shader="ssr_hiz_pass:LEVEL_0" input=["stable_depth_stencil_buffer_alias"] output=["hiz_depth"] }
+
+					// Generate the ssr hiz struct
+					{ type="generate_mips" output_mip_range=[1,10] profiling_scope="ssr_hiz_pass"
+						modifiers = [
+							{ type="fullscreen_pass" shader="ssr_hiz_pass" input=["hiz_depth"] output=["hiz_depth"] }
+						]
+					}
+
+					// Perform ray marching
+					{ type="dynamic_branch" render_settings={ ssr_high_quality=true }
+						pass = [
+							{ type="fullscreen_pass" shader="ssr_ray_march_pass" input=["gbuffer1" "hdr0_history0" "hiz_depth" "hdr3_rg" "hdr3_div2"] output=["hdr0_div2_mip6" "ldr4_div2"] profiling_scope="ssr_ray_march_pass" }
+						]
+						fail = [
+							{ type="fullscreen_pass" shader="ssr_ray_march_pass:SSR_LOW_QUALITY" input=["gbuffer1" "hdr0_history0" "hiz_depth" "hdr3_rg" "hdr3_div2"] output=["hdr0_div2_mip6" "ldr4_div2"] profiling_scope="ssr_ray_march_pass" }
+						]
+					}
+
+					// Filter the ssr buffer
+					{ type="generate_mips" output_mip_range=[1,6] profiling_scope="ssr_filter_pass"
+						modifiers = [
+							{ type="fullscreen_pass" shader="filter:DOWNSAMPLE_MIP" input=["hdr0_div2_mip6"] output=["hdr0_div2_mip6"] }
+							{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_X" input=["hdr0_div2_mip6"] output=["hdr1_div2_mip6"] }
+							{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_Y" input=["hdr1_div2_mip6"] output=["hdr0_div2_mip6"] }
+						]
+					}
+				]
+			}
+		]
+	}
+
+	lighting = {
+		modifiers = [
+			// Build per-pixel sun shadow intensity mask (4 cascades)
+			{ type="dynamic_branch" render_settings={ sun_shadows=true } shading_environment={ sun_shadows_enabled=true } profiling_scope="sun shadow mask"
+				pass = [
+					{ type="mesh_renderer" material="shadow_cutter_slice0" unit_resource="core/stingray_renderer/proxy_geometry/shadow_cutter" mesh="g_box" output=["ldr0"] depth_stencil_target="depth_stencil_buffer" }
+					{ type="fullscreen_pass" material="global_shadow_mask_slice0" input=["sun_shadow_map"] depth_stencil_target="depth_stencil_buffer" output=["ldr0"] }
+					{ type="mesh_renderer" material="shadow_cutter_slice1" unit_resource="core/stingray_renderer/proxy_geometry/shadow_cutter" mesh="g_box" output=["ldr0"] depth_stencil_target="depth_stencil_buffer" }
+					{ type="fullscreen_pass" material="global_shadow_mask_slice1" input=["sun_shadow_map"] depth_stencil_target="depth_stencil_buffer" output=["ldr0"] }
+					{ type="mesh_renderer" material="shadow_cutter_slice2" unit_resource="core/stingray_renderer/proxy_geometry/shadow_cutter" mesh="g_box" output=["ldr0"] depth_stencil_target="depth_stencil_buffer" }
+					{ type="fullscreen_pass" material="global_shadow_mask_slice2" input=["sun_shadow_map"] depth_stencil_target="depth_stencil_buffer" output=["ldr0"] }
+					{ type="mesh_renderer" material="shadow_cutter_slice3" unit_resource="core/stingray_renderer/proxy_geometry/shadow_cutter" mesh="g_box" output=["ldr0"] depth_stencil_target="depth_stencil_buffer" }
+					{ type="fullscreen_pass" material="global_shadow_mask_slice3" input=["sun_shadow_map"] depth_stencil_target="depth_stencil_buffer" output=["ldr0"] }
+				]
+			}
+
+			// Fill pixels not covered by shadow map with default shadow intensity
+			{ type="fullscreen_pass" material="global_shadow_mask_fill" depth_stencil_target="depth_stencil_buffer" output=["ldr0"] profiling_scope="sun shadow mask"}
+
+			{ type = "static_branch" platforms=["win", "ps4", "xb1", "win64uwp"]
+				pass = [
+					{ type="static_branch" platforms=["xb1"]
+						pass = [
+							{ type="esram_control"
+								actions = [
+									{ gpu_wait=["sun_shadow_map"] }
+									{ discard=["sun_shadow_map"] }
+									{ memory_garbage_collect=true }
+								]
+							}
+						]
+					}
+
+					// SSAO
+					{ type="dynamic_branch" render_settings={ ao_enabled=true } shading_environment={ ao_enabled=true } profiling_scope="ssao"
+						pass = [
+							{ type="static_branch" platforms=["xb1"]
+								pass = [
+									{ type="esram_control"
+										actions = [
+											{ allocate=["linear_depth_div2", "ldr1_div2_rg" ] }
+										]
+									}
+								]
+							}
+
+							// Prepare the depth mips
+							{ type="fullscreen_pass" shader="ssao_depth_copy_pass" input=["depth_stencil_buffer" "hdr3_rg"] output=["linear_depth_div2"] profiling_scope="ssao_depth_copy_pass" }
+
+							{ type="generate_mips" output_mip_range=[1,5] profiling_scope="ssao_mip_generation"
+								modifiers = [
+									{ type="fullscreen_pass" shader="ssao_mip_pass" input=["linear_depth_div2"] output=["linear_depth_div2"] }
+								]
+							}
+
+							// Perform SSAO pass
+							{ type="dynamic_branch" shading_environment={ ao_quality=1 }
+								pass = [
+									{ type="fullscreen_pass" shader="ssao_ao_pass:AO_LOW_QUALITY" input=["linear_depth_div2" "gbuffer1"] output=["ldr1_div2_rg"] profiling_scope="ssao_sampling" }
+								]
+								fail = [
+									{ type="dynamic_branch" shading_environment={ ao_quality=2 }
+										pass = [
+											{ type="fullscreen_pass" shader="ssao_ao_pass:AO_MID_QUALITY" input=["linear_depth_div2" "gbuffer1"] output=["ldr1_div2_rg"] profiling_scope="ssao_sampling" }
+										]
+										fail = [
+											{ type="fullscreen_pass" shader="ssao_ao_pass:AO_HIGH_QUALITY" input=["linear_depth_div2" "gbuffer1"] output=["ldr1_div2_rg"] profiling_scope="ssao_sampling" }
+										]
+									}
+								]
+							}
+
+							{ type="fullscreen_pass" shader="temporal_aa:AO" input=["ldr1_div2_rg" "ldr2_div2_r" "hdr3_rg"] output=["ldr3_div2_r"] profiling_scope="ssao_taa" }
+							{ type="fullscreen_pass" shader="copy" input=["ldr3_div2_r"] output=["ldr2_div2_r"] profiling_scope="ssao_history_copy"}
+
+							// We can get rid of linear_depth_div2, but ldr1_div2_r is still needed by the lighting pass so we cannot discard it just yet.
+							{ type="static_branch" platforms=["xb1"]
+								pass = [
+									{ type="esram_control"
+										actions = [
+											{ discard=["linear_depth_div2", "ldr1_div2_rg"] }
+											{ memory_garbage_collect=true }
+										]
+									}
+								]
+							}
+
+						]
+					}
+				]
+			}
+
+			{ type="static_branch" platforms=["xb1"]
+				pass = [
+					{ type="esram_control"
+						actions = [
+							{ allocate=["hdr0"] }
+						]
+					}
+				]
+			}
+
+			// Run global lighting pass
+			{ type="dynamic_branch" shading_environment={ ssr_enabled=true }
+				pass = [
+					{ type="dynamic_branch" shading_environment={ sun_enabled=true }
+						pass = [
+							{ type="fullscreen_pass" shader="global_lighting:SUN:SSR_ENABLED:CLUSTERED_SHADING" depth_stencil_target="depth_stencil_buffer" output=["hdr0"] profiling_scope="global lighting"}
+						]
+						fail = [
+							{ type="fullscreen_pass" shader="global_lighting:SSR_ENABLED:CLUSTERED_SHADING" depth_stencil_target="depth_stencil_buffer" output=["hdr0"] profiling_scope="global lighting"}
+						]
+					}
+				]
+				fail =[
+					{ type="dynamic_branch" shading_environment={ sun_enabled=true }
+						pass = [
+							{ type="fullscreen_pass" shader="global_lighting:SUN:CLUSTERED_SHADING" depth_stencil_target="depth_stencil_buffer" output=["hdr0"] profiling_scope="global lighting"}
+						]
+						fail = [
+							{ type="fullscreen_pass" shader="global_lighting:CLUSTERED_SHADING" depth_stencil_target="depth_stencil_buffer" output=["hdr0"] profiling_scope="global lighting"}
+						]
+					}
+				]
+			}
+
+			// Run deferred_shading modifier for laying down local light sources with material assignment.
+			{ type="dynamic_branch" render_settings={ local_lights=true } profiling_scope="local_lights"
+				pass = [
+					{ type="deferred_shading" output=["hdr0"] depth_stencil_target="depth_stencil_buffer"
+						proxy_geometry="core/stingray_renderer/proxy_geometry/light_proxies"
+						atlased_shadow_mapping_modifier="local_shadows"
+						clustered_shading_modifier="clustered_shading"
+						light_types = [
+							{ type="omni" lighting_shader="light_source:OMNI" lighting_and_shadow_shader="light_source:OMNI:SHADOW_MAPPING" proxy_mesh="g_omni" }
+							{ type="spot" lighting_shader="light_source:SPOT" lighting_and_shadow_shader="light_source:SPOT:SHADOW_MAPPING" proxy_mesh="g_spot" }
+							{ type="box" lighting_shader="light_source:BOX" lighting_and_shadow_shader="light_source:BOX:SHADOW_MAPPING" proxy_mesh="g_box" }
+						]
+					}
+				]
+			}
+
+			{ type = "static_branch" render_caps={ development=true }
+				pass = [
+					{ type="dynamic_branch" render_settings={ gbuffer_ambient_diffuse_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="gbuffer_debug:AMBIENT_DIFFUSE_VISUALIZATION" output=["hdr0"] }
+						]
+					}
+				]
+			}
+		]
+	}
+
+	fog = {
+		modifiers = [
+			{ type="dynamic_branch" shading_environment={ fog_enabled=true }
+				pass = [
+					{ type="fullscreen_pass" shader="depth_fog" depth_stencil_target="depth_stencil_buffer" output=["hdr0"] }
+				]
+			}
+		]
+	}
+
+	post_processing = {
+		modifiers = [
+			{ type="dynamic_branch" render_settings={ debug_rendering=false }
+				pass = [
+					{ type = "static_branch" platforms=["win", "ps4", "xb1", "win64uwp"]
+						pass = [
+							{ type="dynamic_branch" render_settings={ taa_enabled=true } profiling_scope="taa"
+								pass = [
+									{ type = "static_branch" platforms=["win", "win64uwp"]
+										pass = [
+											{ type="dynamic_branch" render_settings={ debug_taa=true } profiling_scope="taa"
+												fail = [
+													{ type="fullscreen_pass" shader="temporal_aa:CUBIC_INTERPOLATION" input=["hdr0" "hdr0_history0" "hdr3_rg" "linear_depth"] output=["hdr1"] profiling_scope="taa" }
+												]
+												pass = [
+													{ type="dynamic_branch" render_settings={ taa_hdr0_lerp_visualization=true }
+														pass = [
+															{ type="fullscreen_pass" shader="temporal_aa:CUBIC_INTERPOLATION:VIZUALIZE_TAA_HISTORY_DIFF" input=["hdr0" "hdr0_history0" "hdr3_rg" "linear_depth"] output=["hdr1" "hdr0_dev_r"] profiling_scope="taa" }
+														]
+													}
+													{ type="dynamic_branch" render_settings={ taa_hdr0_clamp_visualization=true }
+														pass = [
+															{ type="fullscreen_pass" shader="temporal_aa:CUBIC_INTERPOLATION:VIZUALIZE_TAA_CLAMP" input=["hdr0" "hdr0_history0" "hdr3_rg" "linear_depth"] output=["hdr1" "hdr0_dev_r"] profiling_scope="taa" }
+														]
+													}
+													{ type="dynamic_branch" render_settings={ taa_hdr0_jitter_visualization=true }
+														pass = [
+															{ type="fullscreen_pass" shader="temporal_aa:CUBIC_INTERPOLATION:VIZUALIZE_TAA_JITTER" input=["hdr0" "hdr0_history0" "hdr3_rg" "linear_depth"] output=["hdr1" "hdr0_dev_r"] profiling_scope="taa" }
+														]
+													}
+												]
+											}
+
+										]
+										fail = [
+											{ type="fullscreen_pass" shader="temporal_aa" input=["hdr0" "hdr0_history0" "hdr3_rg" "linear_depth"] output=["hdr1"] profiling_scope="taa" }
+										]
+									}
+
+									{ type="fullscreen_pass" shader="copy" input=["hdr1"] output=["hdr0_history0"] profiling_scope="taa_history_copy"}
+									{ type="resource_swap" swaps = {"hdr0"="hdr1"} }
+								]
+								fail = [
+									{ type="dynamic_branch" render_settings={ ssr_enabled=true } shading_environment={ ssr_enabled=true }
+										pass=[
+											{ type="fullscreen_pass" shader="copy" input=["hdr0"] output=["hdr0_history0"] profiling_scope="hdr0_history_copy"}
+										]
+									}
+								]
+							}
+						]
+					}
+
+					// Depth of Field
+					{ type = "static_branch" platforms=["win", "ps4", "xb1", "win64uwp", "webgl"]
+						pass = [
+							{ type="dynamic_branch" render_settings={ dof_enabled=true post_effects_enabled=true } shading_environment={ dof_enabled=true } profiling_scope="depth_of_field"
+								pass = [
+									{ type="static_branch" platforms=["xb1"]
+										pass = [
+											{ type="esram_control"
+												actions = [
+													{ allocate=["ldr1_r" "ldr1" "ldr2"] }
+												]
+											}
+										]
+									}
+
+									{ type="fullscreen_pass" shader="calculate_coc" input=["stable_depth_stencil_buffer_alias"] output=["ldr1_r"] profiling_scope="coc" }
+									{ type="fullscreen_pass" shader="depth_of_field:HORIZONTAL_PASS" input=["hdr0" "ldr1_r"] output=["ldr1"] profiling_scope="dof horizontal"  }
+									{ type="fullscreen_pass" shader="depth_of_field:ASCENDING_DIAGONAL_PASS" input=["ldr1" "ldr1_r"] output=["ldr2"] profiling_scope="dof ascending" }
+									{ type="fullscreen_pass" shader="depth_of_field:DESCENDING_DIAGONAL_PASS" input=["ldr1" "ldr1_r" "ldr2"] output=["hdr0"] profiling_scope="dof descending" }
+
+									{ type="static_branch" platforms=["xb1"]
+										pass = [
+											{ type="esram_control"
+												actions = [
+													{ discard=["ldr1_r" "ldr1" "ldr2"] }
+													{ memory_garbage_collect=true }
+												]
+											}
+										]
+									}
+								]
+							}
+						]
+					}
+
+					// Motion Blur
+					{ type = "static_branch" platforms=["win", "ps4", "xb1", "win64uwp"]
+						pass = [
+							{ type="dynamic_branch" render_settings={ motion_blur_enabled=true post_effects_enabled=true } shading_environment={ motion_blur_enabled=true } profiling_scope="motion_blur"
+								pass = [
+									// Motion Blur
+									{ type="fullscreen_pass" shader="mb_tile_max:HORIZONTAL_PASS" input=["hdr3_rg"] output=["hdr0_rg_w_div10"] profiling_scope="mb_tile_max_h" }
+									{ type="fullscreen_pass" shader="mb_tile_max:VERTICAL_PASS" input=["hdr0_rg_w_div10"] output=["hdr1_rg_div10"] profiling_scope="mb_tile_max_v" }
+									{ type="fullscreen_pass" shader="mb_neighbour_max" input=["hdr1_rg_div10"] output=["hdr0_div10"] profiling_scope="mb_neighbour_max" }
+									{ type="fullscreen_pass" shader="mb_bake_velocity_depth" input=["hdr3_rg" "linear_depth"] output=["hdr1"] profiling_scope="mb_bake_velocity_depth" }
+									{ type="fullscreen_pass" shader="mb_reconstruct_filter_blur" input=["hdr0" "hdr1" "hdr0_div10"] output=["hdr2"] profiling_scope="mb_reconstruct_filter_blur1" }
+									{ type="fullscreen_pass" shader="mb_reconstruct_filter_blur" input=["hdr2" "hdr1" "hdr0_div10"] output=["hdr0"] profiling_scope="mb_reconstruct_filter_blur2" }
+								]
+							}
+						]
+					}
+
+					// Lens Effects
+					{ type = "static_branch" platforms=["win", "ps4", "xb1", "win64uwp", "webgl"]
+						pass = [
+							{ type="dynamic_branch" render_settings={ lens_quality_enabled=true post_effects_enabled=true } shading_environment={ lens_quality_enabled=true } profiling_scope="lens_quality"
+								pass = [
+									{ type="fullscreen_pass" shader="lens_effects" input=["hdr0"] output=["hdr1"] profiling_scope="lens_quality" }
+									{ type="resource_swap" swaps = {"hdr0"="hdr1"} }
+								]
+							}
+						]
+					}
+
+					// Bloom
+					{ type="dynamic_branch" render_settings={ bloom_enabled=true post_effects_enabled=true } shading_environment={ bloom_enabled=true } profiling_scope="bloom"
+						pass = [
+							{ type="fullscreen_pass" shader="bright_pass" input=["hdr0"] output=["hdr1_div2"] profiling_scope="bright_pass" }
+
+							{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_X" input=["hdr1_div2"] output=["hdr0_div2"] }
+							{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_Y" input=["hdr0_div2"] output=["hdr1_div2"] }
+							{ type="fullscreen_pass" shader="filter:DOWNSAMPLE_2x2" input=["hdr1_div2"] output=["hdr1_div4"] }
+
+							{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_X" input=["hdr1_div4"] output=["hdr0_div4"] }
+							{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_Y" input=["hdr0_div4"] output=["hdr1_div4"] }
+
+							{ type="fullscreen_pass" shader="filter:DOWNSAMPLE_4x4" input=["hdr1_div4"] output=["hdr0_div16"] }
+							{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_X" input=["hdr0_div16"] output=["hdr1_div16"] }
+							{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_Y" input=["hdr1_div16"] output=["hdr0_div16"] }
+
+							{ type="fullscreen_pass" shader="filter:DOWNSAMPLE_4x4" input=["hdr0_div16"] output=["hdr0_div64"] }
+							{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_X" input=["hdr0_div64"] output=["hdr1_div64"] }
+							{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_Y" input=["hdr1_div64"] output=["hdr0_div64"] }
+
+							{ type="fullscreen_pass" shader="filter:DOWNSAMPLE_4x4" input=["hdr0_div64"] output=["hdr0_div256"] }
+							{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_X" input=["hdr0_div256"] output=["hdr1_div256"] }
+							{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_Y" input=["hdr1_div256"] output=["hdr0_div256"] }
+
+							{ type="fullscreen_pass" shader="blend_bloom" input=["hdr1_div2" "hdr1_div4" "hdr0_div16" "hdr0_div64" "hdr0_div256"] output=["hdr0_div4"] profiling_scope="blend_bloom" }
+						]
+
+					}
+
+					// Histogram and auto exposure
+					{ type = "static_branch" platforms=["win", "ps4", "xb1", "win64uwp"]
+						pass = [
+							{ type="dynamic_branch" shading_environment={ exposure_auto_enabled=true } profiling_scope="bloom"
+								pass = [
+									{ type="fullscreen_pass" shader="quantize_luma" input=["hdr0"] output=["quantized_luma"]  profiling_scope="quantize_luma" }
+									{ type="compute_kernel" shader="compute_histogram" thread_count_x=40 thread_count_y=1 thread_count_z=1 thread_count_divider=[1 1 1]  profiling_scope="compute_histogram" }
+									{ type="compute_kernel" shader="adapt_exposure" thread_count_x=1 thread_count_y=1 thread_count_z=1 thread_count_divider=[1 1 1]  profiling_scope="adapt_exposure" }
+								]
+							}
+						]
+					}
+
+					// Scene combine
+					{ type="dynamic_branch" render_settings={ bloom_enabled=true post_effects_enabled=true } shading_environment={ bloom_enabled=true } profiling_scope="scene_combine"
+						pass = [
+							{ type="dynamic_branch" render_settings={ color_grading_enabled=true post_effects_enabled=true } shading_environment={ color_grading_enabled=true }
+								pass = [
+									{ type="fullscreen_pass" shader="scene_combine:APPLY_BLOOM:COLOR_GRADING" input=["hdr0" "hdr0_div4"] output=["output_target"] profiling_scope="scene_combine" }
+								]
+								fail = [
+									{ type="fullscreen_pass" shader="scene_combine:APPLY_BLOOM" input=["hdr0" "hdr0_div4"] output=["output_target"] profiling_scope="scene_combine" }
+								]
+							}
+
+							{ type = "static_branch" render_caps={ development=true }
+								pass = [
+									{ type="dynamic_branch" render_settings={ bloom_visualization=true }
+										pass = [
+											{ type="fullscreen_pass" shader="copy" input=["hdr0_div4"] output=["output_target"] }
+										]
+									}
+								]
+							}
+						]
+						fail = [
+							{ type="dynamic_branch" render_settings={ color_grading_enabled=true post_effects_enabled=true } shading_environment={ color_grading_enabled=true }
+								pass = [
+									{ type="fullscreen_pass" shader="scene_combine:COLOR_GRADING" input=["hdr0"] output=["output_target"] profiling_scope="scene_combine" }
+								]
+								fail = [
+									{ type="fullscreen_pass" shader="scene_combine" input=["hdr0"] output=["output_target"] profiling_scope="scene_combine" }
+								]
+							}
+						]
+					}
+
+					{ type="dynamic_branch" render_settings={ clouds_weather_data_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="debug_weather" input=["clouds_weather_texture"] output=["output_target"]  }
+						]
+					}
+
+				]
+			}
+
+			{ type = "static_branch" platforms=["win", "ps4", "xb1", "win64uwp"]
+				pass = [
+					// We copy these buffers even if we are in debug rendering (useful to see how the ssr reprojection behaves). Remember, this needs
+					// to happen at the very end of the post process layer since we are using 'hdr3_div2' to save the ssr history info.
+					{ type="dynamic_branch" render_settings={ ssr_enabled=true } shading_environment={ ssr_enabled=true } profiling_scope="ssr"
+						pass = [
+							// Copy the ssr history. Note: we copy a ressource (hdr0_div2_mip6) with 6 mip levels into one with 1 mip level (hdr3_div2).
+							// This is intended since we only want to reproject the unblurred reflection buffer
+							{ type="fullscreen_pass" shader="copy" input=["hdr0_div2_mip6"] output=["hdr3_div2"] profiling_scope="ssr_copy_history" }
+						]
+					}
+				]
+			}
+
+			{ type = "static_branch" render_caps={ development=true }
+				pass = [
+					{ type="dynamic_branch" render_settings={ taa_hdr0_lerp_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="copy" input=["hdr0_dev_r"] output=["output_target"] }
+						]
+					}
+
+					{ type="dynamic_branch" render_settings={ taa_hdr0_clamp_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="copy" input=["hdr0_dev_r"] output=["output_target"] }
+						]
+					}
+
+					{ type="dynamic_branch" render_settings={ taa_hdr0_jitter_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="copy" input=["hdr0_dev_r"] output=["output_target"] }
+						]
+					}
+
+					{ type="dynamic_branch" render_settings={ taa_ao_lerp_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="temporal_aa:AO:VIZUALIZE_TAA_HISTORY_DIFF" input=["ldr1_div2_rg" "ldr2_div2_r" "hdr3_rg"] output=["ldr3_div2_r" "hdr0_dev_r"] profiling_scope="ssao_taa" }
+							{ type="fullscreen_pass" shader="copy" input=["ldr3_div2_r"] output=["ldr2_div2_r"] profiling_scope="ssao_history_copy"}
+							{ type="fullscreen_pass" shader="copy" input=["hdr0_dev_r"] output=["output_target"] }
+						]
+					}
+
+					{ type="dynamic_branch" render_settings={ taa_stable_depth_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="visualize_stable_depth" input=["stable_depth_stencil_buffer_alias"] output=["output_target"] }
+						]
+					}
+
+					{ type="dynamic_branch" render_settings={ ssr_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="scene_combine" input=["hdr0_div2_mip6"] output=["output_target"] }
+							{ type="fullscreen_pass" shader="copy" input=["hdr0"] output=["hdr0_history0"] }
+						]
+					}
+					{ type="dynamic_branch" render_settings={ ssr_mask_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="copy:ALPHA_TO_RGB" input=["hdr0_div2_mip6"] output=["output_target"] }
+						]
+					}
+
+					{ type="dynamic_branch" render_settings={ ssr_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="scene_combine" input=["hdr0_div2_mip6"] output=["output_target"] }
+							{ type="fullscreen_pass" shader="copy" input=["hdr0"] output=["hdr0_history0"] }
+						]
+					}
+
+					{ type="dynamic_branch" render_settings={ dof_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="calculate_coc" input=["stable_depth_stencil_buffer_alias"] output=["ldr1_r"] profiling_scope="coc" }
+							{ type="fullscreen_pass" shader="scene_combine" input=["hdr0"] output=["hdr1"]  }
+							{ type="fullscreen_pass" shader="depth_of_field:VISUALIZE" input=["hdr1" "ldr1_r"] output=["output_target"]  }
+						]
+					}
+
+					{ type = "static_branch" platforms=["win", "ps4", "xb1", "win64uwp"]
+						pass = [
+							{ type="dynamic_branch" render_settings={ auto_exposure_visualization=true }
+								pass = [
+									{ type="fullscreen_pass" shader="display_histogram" output=["output_target"] }
+								]
+							}
+						]
+					}
+
+					// The very last stage of the entire pipeline is to overlay the selection outline
+					{ type = "static_branch" platforms=["win", "ps4", "xb1", "win64uwp"]
+						pass = [
+							{ type="dynamic_branch" render_settings={ lens_quality_enabled=true } shading_environment={ lens_quality_enabled=true }
+								pass = [
+									{ type="fullscreen_pass" shader="selection_effect:LENS_DISTORT" input=["gbuffer0" "ldr1_dev_r" "stable_depth_stencil_buffer_alias" "depth_stencil_buffer_selection"] output=["output_target"] profiling_scope="selection_lens_distort" }
+								]
+								fail = [
+									{ type="fullscreen_pass" shader="selection_effect" input=["gbuffer0" "ldr1_dev_r" "stable_depth_stencil_buffer_alias" "depth_stencil_buffer_selection"] output=["output_target"] profiling_scope="selection" }
+								]
+							}
+						]
+					}
+
+					{ type="dynamic_branch" render_settings={ clouds_raw_data_visualization=true }
+						pass = [
+							{ type="fullscreen_pass" shader="debug_clouds" input=["clouds_result_texture1" "clouds_result_texture2" "clouds_result_texture3"] output=["output_target"] }
+						]
+					}
+
+				]
+			}
+		]
+	}
+
+	fxaa = {
+		modifiers = [
+			{ type = "dynamic_branch" render_settings={ fxaa_enabled=true debug_rendering=false }
+				pass = [
+					{ type = "fullscreen_pass" shader="fxaa" depth_stencil_target="depth_stencil_buffer" input="output_target" output=["output_target"] }
+				]
+			}
+		]
+	}
+
+	cubemap_capture = {
+		modifiers = [
+			{ type="dynamic_branch" render_settings={ capture_cubemap=true }
+				pass = [
+					//{ type="fullscreen_pass" shader="copy:CUBE_CAPTURE:ENCODE_RGBM" respect_src_viewport=false respect_dest_viewport=false input="hdr0" output=["cubemap_result"] profiling_scope="cubemap_capture" }
+					{ type="fullscreen_pass" shader="copy:CUBE_CAPTURE" respect_src_viewport=false respect_dest_viewport=false input="hdr0" output=["cubemap_result"] profiling_scope="cubemap_capture" }
+				]
+			}
+		]
+	}
+
+	terrain_decoration = {
+		modifiers = [
+			{ type = "fullscreen_pass" shader="terrain_decoration" input=["hmap" "material_map"] output=["buffer0" "buffer1"] }
+		]
+	}
+
+	scaleformstudio_plugin = {
+		modifiers = [
+			{
+				type = "plugin"
+				render_target = "output_target"
+				depth_stencil = "depth_stencil_buffer"
+				plugin_name = "scaleformstudio_plugin"
+			}
+		]
+	}
+
+	scaleformstudio_rtt_plugin = {
+		modifiers = [
+			{
+				type = "plugin"
+				render_target = "rtt_target"
+				plugin_name = "scaleformstudio_plugin"
+			}
+		]
+	}
+
+	// Clouds Compute Shaders
+	cloud_generator_texture1 = {
+		modifiers = [
+			{ type="compute_kernel" shader="generate_clouds:TEXTURE1" thread_count_x="output" thread_count_y="output" thread_count_z="output" thread_count_divider=[8 8 8]  }
+		]		
+	}
+	cloud_generator_texture2 = {
+		modifiers = [
+			{ type="compute_kernel" shader="generate_clouds:TEXTURE2" thread_count_x="output" thread_count_y="output" thread_count_z="output" thread_count_divider=[8 8 8]  }
+		]		
+	}
+	cloud_generator_texture3 = {
+		modifiers = [
+			{ type="compute_kernel" shader="generate_clouds:TEXTURE3" thread_count_x="output" thread_count_y="output" thread_count_z=1 thread_count_divider=[16 16 1]  }
+		]		
+	}
+
+
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Lookup table generation - resource generators specified in this array will run _once_ after the renderer has completed its boot process
+
+lookup_tables = [ ]
+
+// ---------------------------------------------------------------------------------------------------
+// Viewports
+
+viewports = {
+	default = {
+		// resources instanced once per viewport
+		resources = [
+			{ type = "static_branch" platforms=["win", "ps4", "xb1", "win64uwp"]
+				pass = [
+					{ name="histogram" type="render_target" width=256 height=1 format="R32UINT" }
+					{ name="quantized_luma" type="render_target" width=640 height=384 format="R8" }
+
+					{ name="current_exposure" type="render_target" width=1 height=1 format="R32UINT" }
+					{ name="current_exposure_pos" type="render_target" width=1 height=1 format="R32UINT" }
+					{ name="target_exposure_pos" type="render_target" width=1 height=1 format="R32UINT" }
+				]
+			}
+		]
+
+		layer_config = "default"
+		output_rt = "back_buffer"
+		output_dst = "depth_stencil_target"
+	}
+
+	// reserved name for debug world rendering
+	stingray_debug = {
+		// resources instanced once per viewport
+		resources = [
+		]
+
+		layer_config = "stingray_debug"
+		output_rt = "output_target"
+		output_dst = "depth_stencil_target"
+	}
+}
+
+default_shading_environment = "core/stingray_renderer/environments/midday/midday"
+default_terrain_material = "core/stingray_renderer/shaders/terrain_default"

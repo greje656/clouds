@@ -1,0 +1,2216 @@
+includes = [ "core/stingray_renderer/shader_libraries/common.shader_source",
+			 "core/stingray_renderer/shader_libraries/color_management.shader_source",
+			 "core/stingray_renderer/shader_libraries/post_processing_common.shader_source" ]
+
+render_states = {
+	additive_state = {
+		inherits = "default_stencil_reject_msb"
+		states = {
+			z_write_enable = "false"
+			z_enable = "false"
+			blend_enable = "true"
+			blend_op = "blend_op_add"
+			dest_blend = "blend_inv_src_alpha"
+			src_blend = "blend_src_alpha"
+		}
+	}
+}
+
+sampler_states = {
+	mirror_linear = {
+		states = {
+			address_u = "address_mirror"
+			address_v = "address_mirror"
+			address_w = "address_mirror"
+			filter = "min_mag_mip_linear"
+			srgb = "false"
+		}
+	}
+}
+
+hlsl_shaders = {
+
+	clouds_common = {
+		code = """
+			// Cloud constants
+			#define PI 3.1415926535
+			#define TWO_PI PI * 2.0
+			#define DEBUG_WIN_SIZE 256
+			#define TEXTURE1_RES 256
+			#define TEXTURE2_RES 64
+			#define TEXTURE3_RES 128
+
+			// The (inverted) resolution scale at which we update the clouds pixels
+			#define LOW_RES_FACTOR 4
+			#define LOW_RES_FACTOR_X_TWO 16
+
+			#define EARTH_RADIUS 250000.0
+			#define EARTH_CENTER float3(0, 0, -EARTH_RADIUS)
+			#define CLOUDS_START 1000.0
+			#define CLOUDS_END 5000.0
+			#define MAX_CLOUD_DISTANCE 12000.0
+			#define RCP_MAX_CLOUD_DISTANCE 1.0/MAX_CLOUD_DISTANCE
+						
+			#define NUM_STEPS 256
+			#define NUM_GODRAY_SAMPLES 32
+			#define LIGHTING_SAMPLES_1TO5_STEP_SIZE 60.0
+			#define LIGHTING_SAMPLES_6_STEP_SIZE 800.0
+			#define SKY_CLOUDS_MERGE_TONEMAP_RANGE 0.1
+
+			#define CLOUD_DENSITY_THRESHOLD 0.001
+			#define COVERAGE_SCALAR 1.2
+			#define COVERAGE_OFFSET -0.3
+
+			// The time scalar to use accross all clouds calculations and
+			// weather scalar to align weather speed with cloud speed
+			#define TIME_SCALAR 500.0 
+			#define TIME_OFFSET_SCALAR TIME_SCALAR * 10.0 
+			#define WEATHER_TIME_SCALAR 0.000013
+			#define UP_DOWN_DRAFT_RANGE 8000.0
+
+			#define SUN_DISTANCE 10000000.0
+
+			// The order in which we update the clouds pixels
+			static int2 reprojection_offsets[16] = {
+				int2(2,1), int2(1,2), int2(2,0), int2(0,1),
+				int2(2,3), int2(3,2), int2(3,1), int2(0,3),
+				int2(1,0), int2(1,1), int2(3,3), int2(0,0),
+				int2(2,2), int2(1,3), int2(3,0), int2(0,2)
+			};
+
+			static float2 gradient_stratocumulus = float2(0.1, 0.5);
+			static float2 gradient_cumulus = float2(0.2, 1.0);
+			static float2 gradient_cumulonimbus = float2(0.75, 1.0);
+
+			CBUFFER_START(c_clouds_common)
+				float clouds_angle;
+				float clouds_time;
+				float clouds_wind_speed;
+				float clouds_advance_scale;
+				float clouds_advance_erode_scale;
+				float clouds_advance_wyspie_start;
+				float clouds_advance_wyspie_transition;
+				float sky_fog_fade;
+				float2 clouds_advance_erode_low;
+				float2 clouds_advance_erode_high;
+			CBUFFER_END
+
+			float3 view_to_world(float3 view_vector, bool is_point, bool lock_xyz) {
+				float lock_float = new_float(!lock_xyz);
+				float4x4 tmp_camera_inv_view = camera_inv_view;
+				tmp_camera_inv_view[3][0] *= lock_float;
+				tmp_camera_inv_view[3][1] *= lock_float;
+				tmp_camera_inv_view[3][2] *= lock_float;
+				float4 world_vector = mul(float4(view_vector, is_point), tmp_camera_inv_view);
+				return world_vector.xyz;
+			}
+
+			float get_time(float cloud_time, float cloud_wind_speed) {
+				return time * cloud_wind_speed * TIME_SCALAR;
+			}
+
+			float3 encode_curl(float3 c) {
+				return (c + 1.0) * 0.5;
+			}
+
+			float3 decode_curl(float3 c) {
+				return (c - 0.5) * 2.0;
+			}
+
+			float set_range(float value, float low, float high) {
+				return saturate((value - low)/(high - low));
+			}
+
+			float3 set_ranges_signed(float3 values, float low, float high) {
+				return (values - low)/(high - low);
+			}
+
+			float set_range_clamped(float value, float low, float high) {
+				float ranged_value = clamp(value, low, high);
+				ranged_value = (ranged_value - low)/(high - low);
+				return saturate(ranged_value);
+			}
+
+			float2 get_spherical_reflection_uvs(float3 p) {
+				float a = atan2(p.y, p.x);
+				float b = atan2(sqrt(p.x*p.x + p.y*p.y), p.z);
+
+				a /= PI;
+				b /= PI;
+				a = (a + 1.0)/2.0;
+
+				return float2(a,b);
+			}
+
+			float get_night_time(float3 sun_dir, float s, float o){
+				float night_time = dot(sun_dir, float3(0,0,1));
+				return saturate(night_time * s + o);
+			}
+
+			float3 get_raymarch_direction(float3 sun_dir){
+				float direction = get_night_time(sun_dir, 3.0, -0.3) > 0.0 ? -1.0 : 1.0;
+				return sun_dir * direction;
+			}
+
+			float get_fog_factor(float ws_ray_z){
+				// Progressively increase alpha as clouds reaches the horizon
+				float fog_altitude = saturate(ws_ray_z + 0.1) * sky_fog_fade;
+				float fog = 1.0 - saturate(exp(-fog_altitude));
+				return fog;
+			}
+
+			float3 interpolation_c2( float3 x ) { return x * x * x * (x * (x * 6.0 - 15.0) + 10.0); }
+
+			// from: https://github.com/BrianSharpe/GPU-Noise-Lib/blob/master/gpu_noise_lib.glsl
+			void perlin_hash(float3 gridcell,
+								out float4 lowz_hash_0,
+								out float4 lowz_hash_1,
+								out float4 lowz_hash_2,
+								out float4 highz_hash_0,
+								out float4 highz_hash_1,
+								out float4 highz_hash_2)
+			{
+				const float2 OFFSET = float2( 50.0, 161.0 );
+				const float DOMAIN = 69.0;
+				const float3 SOMELARGEFLOATS = float3( 635.298681, 682.357502, 668.926525 );
+				const float3 ZINC = float3( 48.500388, 65.294118, 63.934599 );
+
+				gridcell.xyz = gridcell.xyz - floor(gridcell.xyz * ( 1.0 / DOMAIN )) * DOMAIN;
+				float d = DOMAIN - 1.5;
+				float3 gridcell_inc1 = step( gridcell, float3( d,d,d ) ) * ( gridcell + 1.0 );
+
+				float4 P = float4( gridcell.xy, gridcell_inc1.xy ) + OFFSET.xyxy;
+				P *= P;
+				P = P.xzxz * P.yyww;
+				float3 lowz_mod = float3( 1.0 / ( SOMELARGEFLOATS.xyz + gridcell.zzz * ZINC.xyz ) );
+				float3 highz_mod = float3( 1.0 / ( SOMELARGEFLOATS.xyz + gridcell_inc1.zzz * ZINC.xyz ) );
+				lowz_hash_0 = frac( P * lowz_mod.xxxx );
+				highz_hash_0 = frac( P * highz_mod.xxxx );
+				lowz_hash_1 = frac( P * lowz_mod.yyyy );
+				highz_hash_1 = frac( P * highz_mod.yyyy );
+				lowz_hash_2 = frac( P * lowz_mod.zzzz );
+				highz_hash_2 = frac( P * highz_mod.zzzz );
+			}
+
+			// from: https://github.com/BrianSharpe/GPU-Noise-Lib/blob/master/gpu_noise_lib.glsl
+			float perlin( float3 P ) {
+				float3 Pi = floor(P);
+				float3 Pf = P - Pi;
+				float3 Pf_min1 = Pf - 1.0;
+
+				float4 hashx0, hashy0, hashz0, hashx1, hashy1, hashz1;
+				perlin_hash( Pi, hashx0, hashy0, hashz0, hashx1, hashy1, hashz1 );
+
+				float4 grad_x0 = hashx0 - 0.49999;
+				float4 grad_y0 = hashy0 - 0.49999;
+				float4 grad_z0 = hashz0 - 0.49999;
+				float4 grad_x1 = hashx1 - 0.49999;
+				float4 grad_y1 = hashy1 - 0.49999;
+				float4 grad_z1 = hashz1 - 0.49999;
+				float4 grad_results_0 = rsqrt( grad_x0 * grad_x0 + grad_y0 * grad_y0 + grad_z0 * grad_z0 ) * ( float2( Pf.x, Pf_min1.x ).xyxy * grad_x0 + float2( Pf.y, Pf_min1.y ).xxyy * grad_y0 + Pf.zzzz * grad_z0 );
+				float4 grad_results_1 = rsqrt( grad_x1 * grad_x1 + grad_y1 * grad_y1 + grad_z1 * grad_z1 ) * ( float2( Pf.x, Pf_min1.x ).xyxy * grad_x1 + float2( Pf.y, Pf_min1.y ).xxyy * grad_y1 + Pf_min1.zzzz * grad_z1 );
+
+				float3 blend = interpolation_c2( Pf );
+				float4 res0 = lerp( grad_results_0, grad_results_1, blend.z );
+				float4 blend2 = float4( blend.xy, float2( 1.0 - blend.xy ) );
+				float final = dot( res0, blend2.zxzx * blend2.wwyy );
+				final *= 1.0/sqrt(0.75);
+				return ((final * 1.5) + 1.0) * 0.5;
+			}
+
+			float3 voronoi_hash( float3 x ) {
+				x = float3( dot(x, float3(127.1,311.7, 74.7)),
+							dot(x, float3(269.5,183.3,246.1)),
+							dot(x, float3(113.5,271.9,124.6)));
+				
+				return frac(sin(x) * 43758.5453123);
+			}
+
+			float3 voronoi( in float3 x, bool inverted) {
+				float3 p = floor(x);
+				float3 f = frac(x);
+
+				float id = 0.0;
+				float2 res = float2( 1.0 , 1.0);
+				for(int k=-1; k<=1; k++){
+					for(int j=-1; j<=1; j++) {
+						for(int i=-1; i<=1; i++) {
+							float3 b = float3(i, j, k);
+							float3 r = float3(b) - f + voronoi_hash(p + b);
+							float d = dot(r, r);
+
+							if(d < res.x) {
+								id = dot(p + b, float3(1.0, 57.0, 113.0));
+								res = float2(d, res.x);			
+							} else if(d < res.y) {
+								res.y = d;
+							}
+						}
+					}
+				}
+
+				float2 result = res;//sqrt(res);
+				id = abs(id);
+
+				if(inverted)
+					return float3(1.0 - result, id);
+				else
+					return float3(result, id);
+			}
+
+			float get_worley_2_octaves(float3 p, float3 offset) {
+				float3 xyz = p + offset;
+
+				float worley_value1 = voronoi(xyz * 1.0, true).r;
+				float worley_value2 = voronoi(xyz * 2.0, false).r;
+
+				worley_value1 = saturate(worley_value1);
+				worley_value2 = saturate(worley_value2);
+
+				float worley_value = worley_value1;
+				worley_value = worley_value - worley_value2 * 0.25;
+
+				return worley_value;;
+			}
+
+			float get_worley_3_octaves(float3 p, float3 offset) {
+				float3 xyz = p + offset;
+
+				float worley_value1 = voronoi(xyz * 1.0, true).r;
+				float worley_value2 = voronoi(xyz * 2.0, false).r;
+				float worley_value3 = voronoi(xyz * 4.0, false).r;
+
+				worley_value1 = saturate(worley_value1);
+				worley_value2 = saturate(worley_value2);
+				worley_value3 = saturate(worley_value3);
+
+				float worley_value = worley_value1;
+				worley_value = worley_value - worley_value2 * 0.25;
+				worley_value = worley_value - worley_value3 * 0.25;
+
+				return worley_value;;
+			}
+
+			float get_perlin_5_octaves(float3 p, float3 offset = 0) {
+				float3 xyz = p + offset;
+				float amplitude_factor = 0.5; //707f; 
+				float frequency_factor = 2.0; //5789f;
+
+				float a = 1.0;
+				float perlin_value = 0.0;
+				perlin_value += a * perlin(xyz).r; a *= amplitude_factor; xyz *= (frequency_factor + 0.02);
+				perlin_value += a * perlin(xyz).r; a *= amplitude_factor; xyz *= (frequency_factor + 0.03);
+				perlin_value += a * perlin(xyz).r; a *= amplitude_factor; xyz *= (frequency_factor + 0.01);
+				perlin_value += a * perlin(xyz).r; a *= amplitude_factor; xyz *= (frequency_factor + 0.01);
+				perlin_value += a * perlin(xyz).r;
+
+				return perlin_value;
+			}
+
+			float2 get_cloud_gradient(float cloud_type){
+				float a = 1.0 - saturate(cloud_type/0.5);
+				float b = 1.0 - abs(cloud_type - 0.5) * 2.0;
+				float c = saturate(cloud_type - 0.5)/0.5;
+				return (gradient_stratocumulus * a) + (gradient_cumulus * b) + (gradient_cumulonimbus * c);
+			}
+
+			float get_altitude_coverage(float altitude, float2 gradient) {
+				// For now we hardcode the lower part of the gradient as [0.0, 0.05]. This
+				// gives acceptable results and saves a lot of opps when ray marching!
+				float coverage1 = saturate(altitude / 0.1);
+				float coverage2 = 1.0 - saturate((altitude - gradient.x) / (gradient.y - gradient.x));
+				return coverage1 * coverage2;
+			}
+
+			float2 ray_trace_sphere(float3 center, float3 rd, float3 offset, float radius) {
+				float3 p = center - offset;
+				float b = dot( p, rd );
+				float c = dot( p, p ) - (radius * radius);
+
+				float f = b * b - c;
+				if(f >= 0.0) {
+					float t1 = -b - sqrt( f );
+					float t2 = -b + sqrt( f );
+					return float2(t1,t2);
+				}
+				return -1.0;
+			}
+
+			void find_atmosphere_intersections(float3 ws_origin, float3 ws_ray, out float3 start, out float3 end) {
+				float2 inner_solutions = ray_trace_sphere(ws_origin, ws_ray, EARTH_CENTER, EARTH_RADIUS + CLOUDS_START);
+				float2 outer_solutions = ray_trace_sphere(ws_origin, ws_ray, EARTH_CENTER, EARTH_RADIUS + CLOUDS_END);
+				float t_inner_sphere = max(inner_solutions.x, inner_solutions.y);
+				float t_outer_sphere = max(outer_solutions.x, outer_solutions.y);
+
+				start = ws_origin + ws_ray * t_inner_sphere;
+				end = ws_origin + ws_ray * t_outer_sphere;
+			}
+
+			float2 rotate_uv(float2 uv) {
+				static const float theta = clouds_angle - PI * 2.0;
+				static const float cos_theta = cos(theta);
+				static const float sin_theta = sin(theta);
+
+				float rotated_uv_x = cos_theta * (uv.x - 0.5) - sin_theta * (uv.y - 0.5) + 0.5;
+				float rotated_uv_y = sin_theta * (uv.x - 0.5) + cos_theta * (uv.y - 0.5) + 0.5;
+
+				return float2(rotated_uv_x, rotated_uv_y);
+			}
+
+			float2 get_weather_sampling_pos(float3 pos) {
+				float2 uv = pos.xy * 0.00002 + 0.5;
+				return rotate_uv(uv);
+			}
+
+			float3 get_clouds_sampling_pos(float3 pos){
+				return (pos.xyz - float3(4000, 4000, -EARTH_RADIUS)) * 0.0005 * clouds_advance_scale;
+			}
+
+			float get_low_res_cloud(float4 texture1, float altitude, float altitude_scalar, float2 gradient_values, float view_dependent_lerp, float cloud_coverage) {
+				float altitude_coverage = get_altitude_coverage(altitude, gradient_values);
+				float erode_low = lerp(clouds_advance_erode_low.x, clouds_advance_erode_low.y, view_dependent_lerp);
+
+				// Here we add coverage but only at the bottoms of the clouds to get a pancake 
+				// look for distant clouds
+				float extra_coverage = (1.0 - saturate(altitude * altitude_scalar)) * 0.5;
+				extra_coverage = lerp(0, extra_coverage, pow(view_dependent_lerp, 2));
+
+				float low_range = lerp(1.0, cloud_coverage * COVERAGE_SCALAR + COVERAGE_OFFSET - extra_coverage, altitude_coverage);
+				low_range = saturate(low_range);
+				float clouds_value = set_range_clamped(texture1.r, low_range, 1.0);
+				clouds_value = set_range_clamped(clouds_value, texture1.g * erode_low, 1.0); 
+				clouds_value = set_range_clamped(clouds_value, texture1.b * erode_low * 0.75, 1.0);
+				clouds_value = set_range_clamped(clouds_value, texture1.a * erode_low * 0.50, 1.0);
+				
+				return clouds_value;
+			}
+
+			float get_altitude_density(float altitude, float density, float cloud_type, float density_end_pos) {
+				float local_density_pos = altitude/lerp(density_end_pos * 0.1, density_end_pos, cloud_type);
+				float local_density = lerp(0.0, 1.0, saturate(local_density_pos));
+				float global_density = lerp(0.0, density, altitude);
+
+				return local_density * global_density;
+			}
+
+			float get_high_res_cloud(Sampler3D tex, float3 clouds_sampling_coord, float low_res_clouds_data, float3 curl_offset, float altitude, float view_dependent_lerp, float density, float cloud_type, float density_end_pos) {
+				float4 texture2 = TEX3DLOD(tex, clouds_sampling_coord * clouds_advance_erode_scale + curl_offset, 0);
+				float altitude_density = get_altitude_density(altitude, density, cloud_type, density_end_pos);
+				float erode_high = lerp(clouds_advance_erode_high.x, clouds_advance_erode_high.y, view_dependent_lerp);
+
+				float clouds_value = low_res_clouds_data.r;
+				clouds_value = set_range_clamped(clouds_value, texture2.r * erode_high, 1.0); 
+				clouds_value = set_range_clamped(clouds_value, texture2.g * erode_high * 0.75, 1.0);
+				clouds_value = set_range_clamped(clouds_value, texture2.b * erode_high * 0.50, 1.0);
+				
+				float wispy_bottom = lerp(texture2.a * clouds_advance_wyspie_transition, 0.0, saturate(altitude/clouds_advance_wyspie_start - 0.1));
+				clouds_value = set_range_clamped(clouds_value, wispy_bottom, 1.0);
+
+				clouds_value = clouds_value * altitude_density;
+
+				return clouds_value;
+			}
+
+			void calculate_per_frame_random_data(out float3 per_frame_random_data, float cloud_time, float cloud_wind_speed, float cloud_global_density, float2 uv = float2(0,0)) {
+ 				float2 xy_offset = get_time(cloud_time, cloud_wind_speed * WEATHER_TIME_SCALAR) * cloud_wind_speed + cloud_time;
+ 				
+ 				float3 sampling_pos1 = float3(uv + xy_offset,   0.0) * 2.0;
+ 				float3 sampling_pos2 = float3(uv + xy_offset, 100.0) * 2.0;
+ 				float3 sampling_pos3 = float3(uv + xy_offset, 200.0) * 1.0;
+
+ 				float perlin1 = perlin(sampling_pos1);
+ 				float perlin2 = perlin(sampling_pos2);
+ 				float perlin3 = perlin(sampling_pos3);
+ 				
+ 				perlin1 = set_range(perlin1, 0.0, 1.0);
+ 				perlin2 = set_range(perlin2, 0.0, 1.0);
+ 				perlin3 = set_range(perlin3, 0.0, 1.0);
+
+				per_frame_random_data.x = pow(perlin1, 2.0) * 3.0;
+				per_frame_random_data.y = 0.0;//cloud_global_density;
+				per_frame_random_data.z = perlin3 * UP_DOWN_DRAFT_RANGE;
+
+			}
+
+
+		"""
+	}
+
+	sky_common = {
+		code = """
+			CBUFFER_START(sky)
+				float sky_luminance;
+				float sky_turbidity;
+				float sky_rayleigh_coefficient;
+				float sky_mie_coefficient;
+				float sky_mie_directional_g;
+				float sky_sun_disk_scale;
+				float3 sky_night_moon_color;
+				float3 sky_night_color;
+			CBUFFER_END
+
+			// A simplied version of the total rayleigh scattering
+			float3 simplified_rayleigh() {
+				return 0.0005 / float3(94, 40, 18);
+			}
+
+			float rayleigh_phase(float cos_theta) {
+				return (3.0f / (16.0f*PI)) * (1.0f + pow(cos_theta, 2));
+			}
+
+			// Mie scattering
+			// lambda: set of wavelengths in m
+			// scatter: corresponding scattering
+			// turbidity: cloudiness
+			float3 total_mie(float3 lambda, float3 scatter, float turbidity) {
+				float c = (0.2 * turbidity ) * 10E-18;
+				const float mie_v = 4.0;
+				return 0.434 * c * PI * pow((2 * PI) / lambda, float3(mie_v - 2, mie_v - 2, mie_v - 2)) * scatter;
+			}
+
+			// Henyey-Greenstein approximation as a function of cos(theta)
+			// geo_constant: goemetric constant that defines the shape of the ellipse.
+			float henyey_greenstein_phase(float cos_theta, float geo_constant) {
+				return (1.0f / (4.0f*PI)) * ((1.0f - pow(geo_constant, 2)) / pow(1.0f - 2.0f*geo_constant*cos_theta + pow(geo_constant, 2), 1.5));
+			}
+
+			float sun_intensity(float zenith_angle_cos) {
+				const float sun_intensity_scalar = 1000.0;
+
+				// earth shadow
+				const float cutoff_angle = 1.61107315568707; // PI/1.95;
+				const float steepness = 1.5;
+
+				return sun_intensity_scalar * max(0.0f, 1.0f - exp(-((cutoff_angle - acos(zenith_angle_cos))/steepness)));
+			}
+
+			// Hoffman and Preetham sky model
+			// also referenced implementation by http://www.simonwallner.at/
+			// gpu gems2 summary:
+			// Different particles in the atmosphere scatter light in different ways. 
+			// The two most common forms of scattering in the atmosphere are Rayleigh scattering and Mie scattering. 
+			// Rayleigh scattering is caused by small molecules in the air, and it scatters light more heavily at the shorter wavelengths (blue first, then green, and then red). 
+			// The sky is blue because the blue light bounces all over the place, and ultimately reaches your eyes from every direction. 
+			// The sun's light turns yellow/orange/red at sunset because as light travels far through the atmosphere, 
+			// almost all of the blue and much of the green light is scattered away before it reaches you, leaving just the reddish colors
+			// Mie scattering is caused by larger particles in the air called aerosols (such as dust and pollution), 
+			// and it tends to scatter all wavelengths of light equally. 
+			// On a hazy day, Mie scattering causes the sky to look a bit gray and causes the sun to have a large white halo around it
+			float3 preethams_sky(float3 sun_direction, float3 world_position, float sun_distance, float3 L0, bool render_atmosphere, out float3 fex) {
+				
+				[flatten]
+				if(render_atmosphere)
+					sun_distance = 400000;
+
+				float3 sun_pos = sun_direction * sun_distance;
+				float sunfade = 1.0-clamp(1.0-exp((sun_pos.y/450000.0)),0.0,1.0);
+
+				float rayleigh_coefficient = sky_rayleigh_coefficient - (1.0* (1.0-sunfade));
+
+				const float3 up = float3(0,0,1);
+
+				sun_direction = normalize(sun_pos);
+				float sun_angle = dot(sun_direction, up);
+				float sun_e = sun_intensity(sun_angle);
+
+				// extinction (absorption + out scattering)
+				// rayleigh coefficients
+				float3 beta_r = simplified_rayleigh() * rayleigh_coefficient;
+
+				// mie coefficients
+				const float3 mie_k = float3(0.686, 0.678, 0.666);
+				const float3 lambda = float3(680E-9, 550E-9, 450E-9); // preetham wavelength
+				float3 beta_m = total_mie(lambda, mie_k, sky_turbidity) * sky_mie_coefficient;
+
+				// optical length at zenith for molecules
+				const float rayleigh_zenith_length = 8.4E3;
+				const float mie_zenith_length = 1.25E3;
+
+				// optical length
+				// cutoff angle at 90 to avoid singularity in next formula.
+				float zenith_angle_dot = dot(up, normalize(world_position));
+				float night_time = get_night_time(-sun_direction, 3.0, -0.25);
+
+				float zenith_angle = acos(max(0.0, zenith_angle_dot));
+				float s_r = rayleigh_zenith_length / (cos(zenith_angle) + 0.15 * pow(93.885 - ((zenith_angle * 180.0) / PI), -1.253));
+				float s_m = mie_zenith_length / (cos(zenith_angle) + 0.15 * pow(93.885 - ((zenith_angle * 180.0) / PI), -1.253));
+
+				float3 fex1 = exp(-(beta_r * s_r + beta_m * s_m));
+				float3 fex2 = exp(-(beta_r + beta_m ) * sun_distance);
+
+				fex = render_atmosphere ? fex1 : fex2;
+				fex = lerp(fex, 0.0, night_time);
+
+				// in scattering
+				float cos_theta = dot(normalize(world_position), sun_direction);
+
+				float r_phase = rayleigh_phase(cos_theta*0.5+0.5);
+				float3 beta_rTheta = beta_r * r_phase;
+
+				// This is an attempt to minimize the unatural look of using a stong phasing term when rendering 
+				// the sun on top of a surface (eg: a sunset behind a mountain)
+				float phase_term = render_atmosphere ? sky_mie_directional_g : sky_mie_directional_g * 0.5;
+				float m_phase =  henyey_greenstein_phase(cos_theta, phase_term);
+				float3 beta_theta = beta_m * m_phase;
+
+				float3 lin = pow(sun_e * ((beta_rTheta + beta_theta) / (beta_r + beta_m)) * (1.0 - fex),float3(1.5, 1.5, 1.5));
+				lin *= lerp(float3(1.0, 1.0, 1.0),pow(sun_e * ((beta_rTheta + beta_theta) / (beta_r + beta_m)) * fex,float3(1.0/2.0, 1.0/2.0, 1.0/2.0)),clamp(pow(1.0-dot(up, sun_direction),5.0),0.0,1.0));
+
+				// solar disc
+				float sun_angular_diameter_cos = 0.99995 + (1.0-sky_sun_disk_scale)/10000.0;
+				float sundisk = smoothstep(sun_angular_diameter_cos, sun_angular_diameter_cos+0.00002,cos_theta) * render_atmosphere;
+
+				// bring the intensity of the values in stingray range
+				const float sky_range = 0.005;
+				lin *= sky_range;
+
+				if(render_atmosphere)
+					L0 = (sun_e * 100 * fex) * sundisk * sky_range;
+
+				float3 sky_color = (lin + L0) * sky_luminance;
+
+				float3 night_color = lerp(0.0, sky_night_color * saturate(zenith_angle_dot), night_time);
+				return night_color + sky_color;
+			}
+
+		"""
+	}
+
+	generate_clouds = {
+		includes = [ "common" "clouds_common"]
+		
+		stage_conditions = {
+			compute = "true"
+		}
+
+		code="""
+			#if defined(TEXTURE3)
+				RWTexture2D<float4> output;
+				RWTexture2D<float4> input;
+			#else
+				RWTexture3D<float4> output;
+				RWTexture3D<float4> input;
+			#endif
+
+			float3 curl_noise(float3 pos) {
+				float e = 0.05;
+				float n1, n2, a, b;
+				float3 c;
+
+				n1 = get_perlin_5_octaves(pos.xyz + float3( 0, e, 0));
+				n2 = get_perlin_5_octaves(pos.xyz + float3( 0,-e, 0));
+				a = (n1-n2)/(2*e);
+				n1 = get_perlin_5_octaves(pos.xyz + float3( 0, 0, e));
+				n2 = get_perlin_5_octaves(pos.xyz + float3( 0, 0,-e));
+				b = (n1-n2)/(2*e);
+
+				c.x = a - b;
+
+				n1 = get_perlin_5_octaves(pos.xyz + float3( 0, 0, e));
+				n2 = get_perlin_5_octaves(pos.xyz + float3( 0, 0,-e));
+				a = (n1-n2)/(2*e);
+				n1 = get_perlin_5_octaves(pos.xyz + float3( e, 0, 0));
+				n2 = get_perlin_5_octaves(pos.xyz + float3(-e, 0, 0));
+				b = (n1-n2)/(2*e);
+
+				c.y = a - b;
+
+				n1 = get_perlin_5_octaves(pos.xyz + float3( e, 0, 0));
+				n2 = get_perlin_5_octaves(pos.xyz + float3(-e, 0, 0));
+				a = (n1-n2)/(2*e);
+				n1 = get_perlin_5_octaves(pos.xyz + float3( 0, e, 0));
+				n2 = get_perlin_5_octaves(pos.xyz + float3( 0,-e, 0));
+				b = (n1-n2)/(2*e);
+
+				c.z = a - b;
+
+				return c;
+			}
+
+			float dilate_perlin_worley(float p, float w, float x) {
+				float curve = 0.75;
+				if(x < 0.5) {
+					x = x/0.5;
+					float n = p + w * x;
+					return n * lerp(1, 0.5, pow(x, curve));
+				} else {
+					x = (x-0.5)/0.5;
+					float n = w + p * (1.0 - x);
+					return n * lerp(0.5, 1.0, pow(x, 1.0/curve));
+				}
+			}
+
+			#if defined(TEXTURE1) || defined(TEXTURE2)
+				[numthreads(8, 8, 8)]
+			#else
+				[numthreads(16, 16, 1)]
+			#endif
+
+			void cs_main(uint3 tid : SV_DispatchThreadID) {
+
+				// The single most important value to get right. All other values should be hardcoded,
+				// but it would be nice to have this one exposed as a [0,1] slider. It controls how 
+				// fluffy (perlin) or billowy (worley) the clouds look
+				float perlin_to_worley_ratio    =  0.5;
+
+				// Texture 1
+				float texture1_scale            =  2.0; 
+				float texture1_perlin_scale     =  texture1_scale * 0.5;
+				float texture1_worley_scale     =  texture1_scale * 2.0;
+
+				float texture1_frequency_scale  =  2.0;
+				float texture1_r_perlin_low     =  0.5;
+				float texture1_r_perlin_high    =  1.4;
+				float texture1_r_worley_low     = -0.3;
+				float texture1_r_worley_high    =  1.3;
+				float texture1_gba_worley_low   = -0.4;
+				float texture1_gba_worley_high  =  1.0;
+
+				// Texture 2
+				float texture2_scale            =  5.0; 
+				float texture2_frequency_scale  =  1.5;
+
+				float texture2_low              = -0.2;
+				float texture2_high             =  1.0;
+
+				// Texture 3
+				float curl_scale                =  3.0;
+				float curl_low                  = -0.5;
+				float curl_high                 =  3.0;
+
+				// Offsets (using prime numbers so that the noise patterns never "align")
+				float3 worley_perlin_offset     = float3( -97, -97,  -1);
+				float3 worley_offset1           = float3( 101, 101, 101);
+				float3 worley_offset2           = float3(-103,-103,-103);
+
+				#if defined(TEXTURE3)
+					uint2 st = tid.xy;
+				#else
+					uint3 stu = tid.xyz;
+				#endif
+
+				#if defined(TEXTURE1)
+					float3 xyz = (float3)stu/TEXTURE1_RES;
+
+					// Build the perlin and worley noise of each channel of the first 3d texture. Each stage is
+					// has it's values remmaped to a range which exploits the RGBA8 efficiently
+					float perlin_r = get_perlin_5_octaves(xyz * texture1_perlin_scale,                                  worley_perlin_offset);
+					float worley_r = get_worley_3_octaves(xyz * texture1_worley_scale,                                  worley_offset1 * 1.0);
+					float worley_g = get_worley_3_octaves(xyz * texture1_worley_scale * texture1_frequency_scale * 1.0, worley_offset1 * 2.0);
+					float worley_b = get_worley_3_octaves(xyz * texture1_worley_scale * texture1_frequency_scale * 2.0, worley_offset1 * 3.0);
+					float worley_a = get_worley_2_octaves(xyz * texture1_worley_scale * texture1_frequency_scale * 4.0, worley_offset1 * 4.0);
+
+					// Remap the values
+					perlin_r = set_range(perlin_r, texture1_r_perlin_low, texture1_r_perlin_high);
+					worley_r = set_range(worley_r, texture1_r_worley_low, texture1_r_worley_high);
+					worley_g = set_range(worley_g, texture1_gba_worley_low, texture1_gba_worley_high);
+					worley_b = set_range(worley_b, texture1_gba_worley_low, texture1_gba_worley_high);
+					worley_a = set_range(worley_a, texture1_gba_worley_low, texture1_gba_worley_high);
+
+					// Combinning the two noises (this is what they refer as "dilating" the perlin noise)
+					float worley_perlin = dilate_perlin_worley(perlin_r, worley_r, perlin_to_worley_ratio);
+					
+					output[stu] = float4(worley_perlin, 1.0-worley_g, 1.0-worley_b, 1.0-worley_a);
+					
+				#elif defined(TEXTURE2)
+					float3 xyz = (float3)stu/TEXTURE2_RES;
+
+					// Build the lower resolution worley noise of each channel of the first 3d texture. Each stage is
+					// has it's values remmaped to a range which exploits the RGBA8 efficiently
+					float worley_value_r = get_worley_3_octaves(xyz * texture2_scale,                                  worley_offset2 * 1.0);
+					float worley_value_g = get_worley_3_octaves(xyz * texture2_scale * texture2_frequency_scale,       worley_offset2 * 2.0);
+					float worley_value_b = get_worley_2_octaves(xyz * texture2_scale * texture2_frequency_scale * 2.0, worley_offset2 * 3.0);
+					float worley_value_a = get_worley_3_octaves(xyz * texture2_scale * texture2_frequency_scale * 2.0, worley_offset2 * 4.0);
+
+					// Remap the values
+					worley_value_r = set_range(worley_value_r, texture2_low, texture2_high);
+					worley_value_g = set_range(worley_value_g, texture2_low, texture2_high);
+					worley_value_b = set_range(worley_value_b, texture2_low, texture2_high);
+					worley_value_a = set_range(worley_value_a, texture2_low, texture2_high);
+
+					output[stu] = float4(1.0-worley_value_r, 1.0-worley_value_g, 1.0-worley_value_b, worley_value_a);
+				#else
+					float3 xyz = float3((float2)st.xy/TEXTURE3_RES, 0) * curl_scale;
+					float3 curl_values = curl_noise(xyz);
+
+					curl_values = set_ranges_signed(curl_values, curl_low, curl_high);
+					
+					output[st] = float4(encode_curl(curl_values), 0);
+				#endif
+			}
+		"""
+	}
+
+	generate_weather_data = {		
+ 		includes = [ "common" "clouds_common"]
+ 
+ 		samplers = {
+			"defined(SCRIPTED)" = {
+				clouds_weather_map = { sampler_states = "mirror_linear" }
+			}
+ 		}
+
+ 		code="""
+			#if defined(SCRIPTED)
+				DECLARE_SAMPLER_2D(clouds_weather_map);
+			#endif
+ 		
+ 			struct VS_INPUT {
+ 				float4 position : POSITION;
+ 				float2 uv : TEXCOORD0;				
+ 			};
+ 			
+ 			struct PS_INPUT {
+ 				float4 position : SV_POSITION;
+ 				float2 uv : TEXCOORD0;
+ 			};			 			
+ 			
+ 			CBUFFER_START(c0)
+ 				float4x4 world_view_proj;
+ 				float clouds_advance_coverage_speed;
+ 				float clouds_advance_type_speed;
+ 				float clouds_advance_wetness_speed;
+ 				float clouds_coverage;
+ 				float clouds_type;
+ 				float clouds_wetness;
+ 			CBUFFER_END	
+ 			
+ 			PS_INPUT vs_main(VS_INPUT input)
+ 			{
+ 				PS_INPUT o;
+ 				o.position = mul( input.position, world_view_proj );				
+ 				o.uv = input.uv;
+ 				return o;
+ 			}
+
+ 			float4 ps_main( PS_INPUT input ) : SV_TARGET0 {
+ 				float2 xy_offset  = float2(get_time(clouds_time, clouds_wind_speed * WEATHER_TIME_SCALAR) + clouds_time, 0.0);
+
+ 				#if defined(RANDOM)
+ 					float speed_scale = clouds_wind_speed;
+ 				#else 
+ 					float speed_scale = clouds_wind_speed * 0.5;
+ 				#endif
+
+ 				float2 xy_offset1 = xy_offset * clouds_advance_coverage_speed * speed_scale;
+ 				float2 xy_offset2 = xy_offset * clouds_advance_type_speed * speed_scale;
+ 				float2 xy_offset3 = xy_offset * clouds_advance_wetness_speed * speed_scale;
+
+ 				#if defined(RANDOM)
+	 				float z_offset1 = 0.0;
+	 				float z_offset2 = 100.0;
+
+	 				float3 sampling_pos1 = float3(input.uv + xy_offset1, z_offset1) * 1.5;
+	 				float3 sampling_pos2 = float3(input.uv + xy_offset2, z_offset2) * 0.1;
+	 				float signal1 = get_perlin_5_octaves(sampling_pos1, 0.0);
+	 				float signal2 = get_perlin_5_octaves(sampling_pos2, 0.0);
+	 				
+	 				float v1 = set_range(signal1, 0.5, 1.3);
+	 				float v2 = set_range(signal2, 0.5, 1.3);
+
+	 				float global_weather = saturate((lerp(1.0, 0.0, pow(v2, 0.5)) - 0.3) * 5.0);
+
+	 				float2 p1_sunny = float2(0.2, 0.75);
+	 				float2 p1_rainy = float2(0.0, 0.00);
+	 				float2 p2_sunny = float2(1.5, 0.20);
+	 				float2 p2_rainy = float2(1.5, 1.00);
+	 				float2 p3_sunny = float2(0.5, 0.00);
+	 				float2 p3_rainy = float2(1.0, 0.75);
+
+	 				float2 p1 = lerp(p1_sunny, p1_rainy, global_weather);
+	 				float2 p2 = lerp(p2_sunny, p2_rainy, global_weather);
+	 				float2 p3 = lerp(p3_sunny, p3_rainy, global_weather);
+	 				float perlin1 = lerp(p1.x, p1.y, pow(v1, 0.3));
+	 				float perlin2 = lerp(p2.x, p2.y, pow(v1, 0.5));
+	 				float perlin3 = lerp(p3.x, p3.y, pow(v1, 0.5));;
+
+					return float4(perlin1, perlin2, perlin3, global_weather);
+	 			#else
+					float2 sm_resolution;
+					clouds_weather_map.tex.GetDimensions(sm_resolution.x, sm_resolution.y);
+					float2 uv = input.uv * float2(sm_resolution.y/sm_resolution.x, 1);
+					
+					float coverage = TEX2DLOD(clouds_weather_map, uv + xy_offset1, 0.0).r;
+					float type = TEX2DLOD(clouds_weather_map, uv + xy_offset2, 0.0).g;
+					float wetness = TEX2DLOD(clouds_weather_map, uv + xy_offset3, 0.0).b;
+					
+					return float4(coverage, type, wetness, 0.0);
+	 			#endif
+ 				
+			}
+		"""
+	}
+
+	reproject_clouds = {
+		includes = ["common" "clouds_common" "space_conversion"]
+		
+		samplers = {
+			input_texture0 = { sampler_states = "clamp_linear" }
+			input_texture1 = { sampler_states = "clamp_point" }
+			input_texture2 = { sampler_states = "clamp_point" }
+		}
+
+		code="""
+			CBUFFER_START(c0)
+				float4x4 world_view_proj;
+				float3 sun_direction;
+				float2 input_texture0_size;
+				float2 input_texture1_size;
+			CBUFFER_END
+
+			DECLARE_SAMPLER_2D(input_texture0);
+			DECLARE_SAMPLER_2D(input_texture1);
+			DECLARE_SAMPLER_2D(input_texture2);
+
+			struct VS_INPUT {
+				float4 position : POSITION;
+				float2 uv : TEXCOORD0;
+			};
+
+			struct PS_INPUT {
+				float4 position : SV_POSITION;
+				float2 uv : TEXCOORD0;
+			};
+
+			PS_INPUT vs_main(VS_INPUT input) {
+				PS_INPUT o;
+				o.position = mul(input.position, world_view_proj);
+				o.uv = input.uv;
+				return o;
+			}
+
+			// From http://mathworld.wolfram.com/LagrangeInterpolatingPolynomial.html
+			float4 lagrange_3rd_degree_interpolation(float4 y0, float4 y1, float4 y2, float4 y3, float x) {
+				const float x_minus_x0 = x + 1.0;
+				const float x_minus_x1 = x;
+				const float x_minus_x2 = x - 1.0;
+				const float x_minus_x3 = x - 2.0;
+				const float x_minus_x0_mul_x_minus_x1 = x_minus_x0 * x_minus_x1;
+				const float x_minus_x2_mul_x_minus_x3 = x_minus_x2 * x_minus_x3;
+
+				float4 t0 = y0 * x_minus_x1 * x_minus_x2_mul_x_minus_x3 * -0.1666666f;
+				float4 t1 = y1 * x_minus_x0 * x_minus_x2_mul_x_minus_x3 * 0.5f;
+				float4 t2 = y2 * x_minus_x0_mul_x_minus_x1 * x_minus_x3 * -0.5f;
+				float4 t3 = y3 * x_minus_x0_mul_x_minus_x1 * x_minus_x2 * 0.166666f;
+
+				return t0 + t1 + t2 + t3;
+			}
+
+			float4 lagrange_cubic_sample_2d(Sampler2D tex, float2 uv, float2 texture_size) {
+				float2 pixel_size = 1.0 / texture_size;
+				float2 offseted_uv = uv * texture_size + 0.5;
+				float2 pixel_coordinate = frac(offseted_uv);
+				offseted_uv = floor(offseted_uv) / texture_size - pixel_size * 0.5;
+
+				float4 c00 = tex.tex.Sample(tex.state, offseted_uv, int2(-1,-1)).rgba;
+				float4 c10 = tex.tex.Sample(tex.state, offseted_uv, int2( 0,-1)).rgba;
+				float4 c20 = tex.tex.Sample(tex.state, offseted_uv, int2( 1,-1)).rgba;
+				float4 c30 = tex.tex.Sample(tex.state, offseted_uv, int2( 2,-1)).rgba;
+
+				float4 c01 = tex.tex.Sample(tex.state, offseted_uv, int2(-1, 0)).rgba;
+				float4 c11 = tex.tex.Sample(tex.state, offseted_uv, int2( 0, 0)).rgba;
+				float4 c21 = tex.tex.Sample(tex.state, offseted_uv, int2( 1, 0)).rgba;
+				float4 c31 = tex.tex.Sample(tex.state, offseted_uv, int2( 2, 0)).rgba;
+
+				float4 c02 = tex.tex.Sample(tex.state, offseted_uv, int2(-1, 1)).rgba;
+				float4 c12 = tex.tex.Sample(tex.state, offseted_uv, int2( 0, 1)).rgba;
+				float4 c22 = tex.tex.Sample(tex.state, offseted_uv, int2( 1, 1)).rgba;
+				float4 c32 = tex.tex.Sample(tex.state, offseted_uv, int2( 2, 1)).rgba;
+
+				float4 c03 = tex.tex.Sample(tex.state, offseted_uv, int2(-1, 2)).rgba;
+				float4 c13 = tex.tex.Sample(tex.state, offseted_uv, int2( 0, 2)).rgba;
+				float4 c23 = tex.tex.Sample(tex.state, offseted_uv, int2( 1, 2)).rgba;
+				float4 c33 = tex.tex.Sample(tex.state, offseted_uv, int2( 2, 2)).rgba;
+
+				float4 l0 = lagrange_3rd_degree_interpolation(c00, c10, c20, c30, pixel_coordinate.x);
+				float4 l1 = lagrange_3rd_degree_interpolation(c01, c11, c21, c31, pixel_coordinate.x);
+				float4 l2 = lagrange_3rd_degree_interpolation(c02, c12, c22, c32, pixel_coordinate.x);
+				float4 l3 = lagrange_3rd_degree_interpolation(c03, c13, c23, c33, pixel_coordinate.x);
+
+				return lagrange_3rd_degree_interpolation(l0, l1, l2, l3, pixel_coordinate.y);
+			}
+
+			float4 ps_main(PS_INPUT input) : SV_TARGET0 {
+				
+				int2 pixel_pos = (int2)input.position.xy;
+				int2 pixel_id = pixel_pos - reprojection_offsets[frame_number % LOW_RES_FACTOR_X_TWO];
+				int2 pixel_id_query = (pixel_id % int2(LOW_RES_FACTOR, LOW_RES_FACTOR)) == int2(0,0);
+				bool should_update_pixel = (pixel_id_query.x && pixel_id_query.y);
+
+				float2 clouds_motion_vector = TEX2DLOD(input_texture2, input.uv, 0);
+				float2 ss_prev_pos =  input.uv - clouds_motion_vector;
+				float4 prev_color = lagrange_cubic_sample_2d(input_texture1, ss_prev_pos, input_texture1_size);
+
+				float2 nd_prev_pos = ss_prev_pos * 2.0 - 1.0;
+				bool reprojection_is_offscreen = max(abs(nd_prev_pos.x), abs(nd_prev_pos.y)) >= 1.0;
+
+				float4 reprojected_color = 0;
+
+				[branch]
+				if(should_update_pixel) {
+					int2 low_res_pixel_id = pixel_pos / LOW_RES_FACTOR;
+					float2 low_res_uv = low_res_pixel_id / input_texture0_size + 0.5/input_texture0_size;
+
+					float4 upsampled_color = TEX2DLOD(input_texture0, low_res_uv, 0);
+
+					if(reprojection_is_offscreen)
+						prev_color = upsampled_color;
+
+
+					float history_diff = lerp(1.0, 0.75, saturate(clouds_wind_speed));
+					reprojected_color = lerp(prev_color, upsampled_color, history_diff);
+
+				} else {
+					float4 upsampled_color = TEX2DLOD(input_texture0, input.uv, 0);
+
+					if(reprojection_is_offscreen)
+						prev_color = upsampled_color;
+
+					float mv_history_diff = length(clouds_motion_vector) * 5.0;
+					float wind_speed_history_diff = lerp(1.0/64.0, 0.5, saturate(clouds_wind_speed));
+					float history_diff = mv_history_diff + wind_speed_history_diff;
+					history_diff = clamp(history_diff, 1.0/64.0, 0.75);
+
+					reprojected_color = lerp(prev_color, upsampled_color, history_diff);
+
+				}
+
+				// Clamp negative values
+				reprojected_color = -min(-reprojected_color, 0.0);
+
+				return reprojected_color;
+			}
+		"""
+	}
+
+	raymarch_clouds = {
+		includes = ["common" "clouds_common" "space_conversion" "post_processing_common" "sky_common" "color_management"]
+		
+		samplers = {
+			input_texture0 = { sampler_states = "mirror_linear" }
+			input_texture1 = { sampler_states = "mirror_linear" }
+			input_texture2 = { sampler_states = "mirror_linear" }
+			input_texture3 = { sampler_states = "mirror_linear" }
+			clouds_advance_altitude_cloud_map = { sampler_states = "mirror_linear" }
+		}
+
+		code="""			
+			CBUFFER_START(c0)
+				float4x4 world_view_proj;
+				float3 sun_direction;
+
+				#if !defined(SAMPLE_WEATHER_DATA)
+					float clouds_coverage;
+					float clouds_wetness;
+					float clouds_type;
+				#endif
+
+				float clouds_phase;
+				float clouds_scattering;
+				float clouds_global_density;
+				float clouds_advance_curl_speed;
+
+				float clouds_advance_ambient_top;
+				float clouds_advance_ambient_bottom;
+				float clouds_advance_scattering_color_blend;
+				float clouds_advance_extinction_distance;
+				float clouds_advance_curl_amplitude;
+				float clouds_advance_curl_frequency;
+				float clouds_advance_altitude_cloud_speed;
+				float clouds_advance_altitude_cloud_coverage;
+				float sky_horizon_offset;
+				float2 clouds_advance_extinction_reducer;
+				float2 clouds_advance_bottom_darkening_start;
+				float2 clouds_advance_bottom_darkening;
+				float2 clouds_advance_extinction;
+				float2 clouds_advance_extinction_near;
+				float2 clouds_advance_extinction_far;
+				float2 clouds_advance_extinction_color_blend;
+				float2 clouds_advance_extinction_color_scalar;
+				float2 clouds_advance_powder_amount_near;
+				float2 clouds_advance_powder_amount_far;
+				float2 clouds_advance_powder_coef_near;
+				float2 clouds_advance_powder_coef_far;
+				float2 clouds_advance_scattering;
+				float2 clouds_advance_local_density_end;
+				float2 clouds_advance_altitude_cloud_scale;
+				float3 clouds_advance_extinction_color1;
+				float3 clouds_advance_extinction_color2;
+				float3 clouds_advance_extinction_color3;
+
+				float sky_distance_clouds_scale;
+				float3 sky_night_ambient_color;			
+			CBUFFER_END
+
+			DECLARE_SAMPLER_3D(input_texture0);
+			DECLARE_SAMPLER_3D(input_texture1);
+			DECLARE_SAMPLER_2D(input_texture2);
+			DECLARE_SAMPLER_2D(input_texture3);
+			DECLARE_SAMPLER_2D(clouds_advance_altitude_cloud_map);
+
+			struct VS_INPUT {
+				float4 position : POSITION;
+				float2 uv : TEXCOORD0;
+			};
+
+			struct PS_INPUT {
+				float4 position : SV_POSITION;
+				float2 uv : TEXCOORD0;
+				NO_INTERPOLATION float3 sun_color : TEXCOORD1;
+				NO_INTERPOLATION float3 ambient_top_color : TEXCOORD2;
+				NO_INTERPOLATION float3 ambient_bottom_color : TEXCOORD3;
+				NO_INTERPOLATION float3 extinction_color : TEXCOORD4;
+				NO_INTERPOLATION float3 per_frame_random_data : TEXCOORD5;
+
+			};
+
+			struct PS_OUTPUT {
+				float4 buffer0;
+				float2 buffer1;
+			};
+
+			struct WetnessTerms {
+				float wetness_extinction;
+				float wetness_extinction_near;
+				float wetness_extinction_far;
+				float wetness_extinction_blend;
+				float wetness_extinction_color;
+				float wetness_scattering;
+				float wetness_powder_near;
+				float wetness_powder_coef_near;
+				float wetness_powder_far;
+				float wetness_powder_coef_far;
+				float wetness_bottom_darkening_start;
+				float wetness_bottom_darkening;
+				float wetness_extinction_reducer;
+				float wetness_density_end_pos;
+			};
+
+			float extinction_color_lerp(float3 ws_sun_dir) {
+					float d = dot(ws_sun_dir, float3(0,0,1));
+					float a = acos(d) / PI;
+					float x = (a - 0.48 + 0.1)/0.2;
+					return smoothstep(0.0 ,1.0, x);
+			}
+
+			void calculate_atmosphere_color_values(float3 ws_sun_dir, out float3 sun_color, out float3 ambient_top_color, out float3 ambient_bottom_color, out float3 extinction_color) {
+				float2 projected_sun_dir_on_plane = normalize(ws_sun_dir.xy) + float2(0.1, 0.1);
+				float2 per_projected_sun_dir_on_plane = float2(-projected_sun_dir_on_plane.y, projected_sun_dir_on_plane.x);
+				float2 realigned_sun_dir_on_plane = normalize(projected_sun_dir_on_plane + per_projected_sun_dir_on_plane * 0.1);
+				float2 realigned_offset_vector = projected_sun_dir_on_plane * 0.1;
+				float3 ws_realigned_up_dir = normalize(float3(realigned_offset_vector,1));
+				float3 ws_realigned_sun_dir_on_plane = float3(realigned_sun_dir_on_plane,0);
+
+				float3 ws_sun_pos = -ws_sun_dir * MAX_CLOUD_DISTANCE;
+				float3 ws_top_pos = ws_realigned_up_dir * MAX_CLOUD_DISTANCE;
+				float3 ws_side_pos = ws_realigned_sun_dir_on_plane * MAX_CLOUD_DISTANCE;
+
+				// get lighting terms
+				float3 null = 0;
+				preethams_sky(-ws_sun_dir, ws_sun_pos, 0.0, null, true, sun_color);
+				ambient_top_color = 0;//preethams_sky(-ws_sun_dir, ws_top_pos, 0.0, null, true, null);
+				ambient_bottom_color = 0;//preethams_sky(-ws_sun_dir, ws_side_pos, 0.0, null, true, null);
+
+				float night_time = dot(ws_sun_dir, float3(0,0,1));
+				night_time = saturate(night_time * 2.0 + 0.5);
+
+				float night_time2 = dot(ws_sun_dir, float3(0,0,1));
+				night_time2 = saturate(night_time2 * 2.0 - 0.3);
+
+				float night_time3 = extinction_color_lerp(-ws_sun_dir);
+
+				sun_color = lerp(sun_color, sky_night_moon_color, night_time2);
+				ambient_bottom_color = lerp(ambient_bottom_color, sky_night_ambient_color, night_time);
+				ambient_top_color = lerp(ambient_top_color, sky_night_ambient_color * 0.5, night_time);
+
+				extinction_color = lerp(clouds_advance_extinction_color1, clouds_advance_extinction_color2, saturate(night_time3 * 2.0));
+				extinction_color = lerp(extinction_color, clouds_advance_extinction_color3, saturate(night_time3 - 0.5)/0.5);
+			}
+			
+			// Realtime Volumetric Rendering Course Notes by Patapom (page 15)
+			float exponential_integral(float z) {
+				return 0.5772156649015328606065 + log( 1e-4 + abs(z) ) + z * (1.0 + z * (0.25 + z * ( (1.0/18.0) + z * ( (1.0/96.0) + z * (1.0/600.0) ) ) ) ); // For x!=0
+			}
+
+			// Realtime Volumetric Rendering Course Notes by Patapom (page 15)
+			float3 get_ambient_color(float altitude, float extinction_coeff, in float3 ambient_bottom, in float3 ambient_top) {
+				// For now make ambient color white (less instructions)
+				float ambient_term = -extinction_coeff * saturate(1.0 - altitude);
+				float3 isotropic_scattering_top = clouds_advance_ambient_top * max( 0.0, exp(ambient_term) - ambient_term * exponential_integral(ambient_term));
+				
+				ambient_term = -extinction_coeff * altitude;
+				float3 isotropic_scattering_bottom = clouds_advance_ambient_bottom * max(0.0, exp(ambient_term) - ambient_term * exponential_integral(ambient_term));
+				
+				// Modulate the ambient term by the altitude
+				isotropic_scattering_top *= saturate(altitude * 0.5);
+				
+				return isotropic_scattering_top + isotropic_scattering_bottom;
+			}
+			
+			// Realtime Volumetric Rendering Course Notes by Patapom (page 7)
+			float get_sun_phase(float3 ray_dir, float3 sun_dir, float g) {
+				float t = acos(dot(ray_dir, sun_dir));
+				float term_a = 1 - g * g;
+				float term_b = 1 + g * g;
+				float term_c = 2 * g * cos(t);
+				float term_d = 4 * PI * pow(term_b - term_c, 3.0/2.0);
+				float phase = term_a / term_d;
+				return phase;
+			}
+
+			float get_atmosphere_shadow(float altitude, in float3 light_vector){
+				float sunset_offset = 0.6;
+				float atmospheric_spread = 0.1;
+				float om_atmospheric_spread = 1.0 - atmospheric_spread;
+				float dd = 1.0 - saturate(dot(float3(0,0,1), light_vector)/0.2 + sunset_offset) + atmospheric_spread;
+				float bb = saturate(dd - atmospheric_spread);
+				float term =  saturate(altitude * om_atmospheric_spread - bb + atmospheric_spread)/atmospheric_spread;
+				return saturate(term);
+			}
+			
+
+			float3 get_curl_offset(Sampler2D tex, in float3 pos, float curl_amplitude, float curl_frequency){
+				float4 curl_data = TEX2DLOD(tex, pos.xy * curl_frequency, 0.0);
+				return decode_curl(curl_data.rgb) * curl_amplitude;
+			}
+			
+			void get_high_altitude_clouds_contribution(float3 pos, float3 sun_color, inout float3 scattering, inout float extinction, float2 uv, float sun_phase, float coverage){
+				float3 p = normalize(pos);
+				float angle_p_up = abs(dot(p, float3(0,0,1)));
+				float pinching_mask = saturate((1.0 - angle_p_up)/0.2);
+				float2 spherical_uv = get_spherical_reflection_uvs(p);
+	
+				float anim_uv = spherical_uv.x + (get_time(clouds_time, clouds_advance_altitude_cloud_speed) + clouds_time * TIME_OFFSET_SCALAR) * 0.0001;
+				anim_uv = anim_uv % 1;
+				float2 new_uv = float2(anim_uv, spherical_uv.y) * clouds_advance_altitude_cloud_scale;
+
+				// we sample with mirror and multiply with 2 to avoid seeing an obvious seam in the curl texture
+				float4 curl_data = TEX2DLOD(input_texture2, spherical_uv*2, 0.0);
+				float2 high_altitude_curl_offset = decode_curl(curl_data.rgb) * 0.01;
+
+				// fade out curl near spherical uv seam to avoid showing this seam in the bg texture
+				float2 high_altitude_curl_offset_mask = float2(1,1);
+
+				float limit_a = saturate(anim_uv - 0.9) * 10;
+				high_altitude_curl_offset_mask = lerp(high_altitude_curl_offset_mask, float2(0.0, 0.0), limit_a);
+
+				float limit_b = saturate(anim_uv * 10.0);
+				high_altitude_curl_offset_mask = lerp(float2(0.0, 0.0), high_altitude_curl_offset_mask, limit_b);
+
+				high_altitude_curl_offset_mask = pow(high_altitude_curl_offset_mask, 3);
+				high_altitude_curl_offset *= high_altitude_curl_offset_mask;
+
+				new_uv += (high_altitude_curl_offset);
+
+				// From coverage 0.25 -> 0.0 we start fading the cloud values (so we don't get banding in the last few white intensities)
+				// We also scale by 0.95 to dial down 1.0 values which would absorve all light in high altitude clouds (looks a bit weird)
+				float low_coverage_fade = saturate(coverage / 0.25) * 0.95;
+				float skydome_color = TEX2DLOD(clouds_advance_altitude_cloud_map, new_uv, 0.0).x * low_coverage_fade;
+				float high_altitude_cloud_amount = set_range(skydome_color, 1.0 - coverage, 1.0) * pinching_mask;
+
+				scattering += high_altitude_cloud_amount * sun_color * extinction * (sun_phase * 500.0) * saturate(coverage * 0.5) * 0.02;
+				extinction *= saturate(1.0 - high_altitude_cloud_amount);
+			}
+
+			float4 get_final_color(float3 scattering, float extinction, float blend_color_scalar, float blend_amount, float bottom_darkening, float extinction_altitude, float altitude_scalar, float3 extinction_color, float bottom_darkening_start){
+				// We darken the extinction color at the base of the clouds (and randomize it a bit to avoid a flat gradient look)
+				float dark_bottoms = extinction_altitude * altitude_scalar - bottom_darkening_start;
+				float b = lerp(blend_color_scalar * bottom_darkening, blend_color_scalar, saturate(dark_bottoms));
+
+				float3 final_color = scattering + extinction_color * b;
+
+				// Add an offset where there is high luminance of the scattering term (so we can keep nice cloud highlights)
+				float scattering_blend_offset = luminance(scattering) * clouds_advance_scattering_color_blend;
+				float alpha = (1.0 - extinction) * saturate(blend_amount + scattering_blend_offset);
+
+				// From this point onwards, all other passes can assume alpha is in a [0,1] range
+				return float4(final_color, saturate(alpha));
+			}
+
+			float get_altitude_scalar(float cloud_type){
+				return lerp(8.0, 2.0, cloud_type);
+			}
+
+			void update_wetness_terms(inout WetnessTerms wt, float cloud_wetness){
+				wt.wetness_extinction             = lerp( clouds_advance_extinction.x, clouds_advance_extinction.y, cloud_wetness);
+				wt.wetness_extinction_near        = lerp( clouds_advance_extinction_near.x, clouds_advance_extinction_near.y, cloud_wetness);
+				wt.wetness_extinction_far         = lerp( clouds_advance_extinction_far.x, clouds_advance_extinction_far.y, cloud_wetness);
+				wt.wetness_extinction_blend       = lerp( clouds_advance_extinction_color_blend.x, clouds_advance_extinction_color_blend.y, cloud_wetness);
+				wt.wetness_extinction_color       = lerp( clouds_advance_extinction_color_scalar.x, clouds_advance_extinction_color_scalar.y, cloud_wetness);
+				wt.wetness_scattering             = lerp( clouds_advance_scattering.x, clouds_advance_scattering.y, cloud_wetness);
+				wt.wetness_powder_near            = lerp( clouds_advance_powder_amount_near.x, clouds_advance_powder_amount_near.y, cloud_wetness);
+				wt.wetness_powder_coef_near       = lerp( clouds_advance_powder_coef_near.x, clouds_advance_powder_coef_near.y, cloud_wetness);
+				wt.wetness_powder_far             = lerp( clouds_advance_powder_amount_far.x, clouds_advance_powder_amount_far.y, cloud_wetness);
+				wt.wetness_powder_coef_far        = lerp( clouds_advance_powder_coef_far.x, clouds_advance_powder_coef_far.y, cloud_wetness);
+				wt.wetness_bottom_darkening_start = lerp( clouds_advance_bottom_darkening_start.x, clouds_advance_bottom_darkening_start.y, cloud_wetness);
+				wt.wetness_bottom_darkening       = lerp( clouds_advance_bottom_darkening.x, clouds_advance_bottom_darkening.y, cloud_wetness);
+				wt.wetness_extinction_reducer     = lerp( clouds_advance_extinction_reducer.x, clouds_advance_extinction_reducer.y, cloud_wetness);
+				wt.wetness_density_end_pos        = lerp( clouds_advance_local_density_end.x, clouds_advance_local_density_end.y, cloud_wetness);
+			}
+
+			PS_INPUT vs_main(VS_INPUT input) {
+				PS_INPUT o;
+				o.position = mul(input.position, world_view_proj);
+				o.uv = input.uv;
+				calculate_per_frame_random_data(o.per_frame_random_data, clouds_time, clouds_wind_speed, clouds_global_density);
+				calculate_atmosphere_color_values(sun_direction, o.sun_color, o.ambient_top_color, o.ambient_bottom_color, o.extinction_color);
+
+				return o;
+			}
+
+			PS_OUTPUT ps_main(PS_INPUT input) : SV_TARGET0 {
+
+				int2 pixel_pos = input.position.xy * LOW_RES_FACTOR;
+				pixel_pos += reprojection_offsets[frame_number % LOW_RES_FACTOR_X_TWO];
+				
+				float2 uv = pixel_pos/back_buffer_size - (2.0/back_buffer_size);
+				uv.y += sky_horizon_offset;
+
+				float3 ss_pos = float3(uv, 0.0);
+				float3 view_pos = ss_to_view(ss_pos, 1.0);
+				float3 ws_pos = view_to_world(view_pos, 1.0, 1.0);
+				float3 ws_origin = 0.0;
+				float3 ws_sun_dir = sun_direction;
+				float3 ws_ray = normalize(ws_pos);
+				
+				float3 ws_atmosphere_start = 0.0;
+				float3 ws_atmosphere_end = 0.0;
+				find_atmosphere_intersections(ws_origin, ws_ray, ws_atmosphere_start, ws_atmosphere_end);
+
+				float3 vs_prev_view = world_to_prev_view(ws_atmosphere_end, 1.0, 1.0);
+				float3 ss_prev_view = view_to_ss(vs_prev_view, 1);
+				float2 clouds_motion_vector = uv - ss_prev_view.xy;
+
+				PS_OUTPUT to_return;
+				to_return.buffer0 = 0.0;
+				to_return.buffer1 = clouds_motion_vector;
+
+				if(ws_ray.z < -0.1)
+					return to_return;
+
+				// Phase function
+				const float3 raymarch_dir = get_raymarch_direction(sun_direction);				
+				const float sun_phase = get_sun_phase(ws_ray, raymarch_dir, -clouds_phase);
+				const float high_altutude_sun_phase = get_sun_phase(ws_ray, ws_sun_dir, -min(clouds_phase * 2.0, 0.9));
+
+				const float cloud_time = get_time(clouds_time, clouds_wind_speed);
+				const float3 wind_direction = float3(cos(-clouds_angle), sin(-clouds_angle), 0);
+				const float3 wind_vector = wind_direction * float3(clouds_wind_speed, clouds_wind_speed, 1);;
+				const float3 curl_vector = wind_direction * float3(clouds_advance_curl_speed, clouds_advance_curl_speed, 1);;
+				float3 wind_offset = wind_vector * cloud_time + wind_direction * clouds_time * TIME_OFFSET_SCALAR;
+				float3 curl_offset = curl_vector * cloud_time;
+				
+				//wind_offset.z = input.per_frame_random_data.z;
+				//curl_offset.z = input.per_frame_random_data.z;
+				wind_offset.z = time * 5.5;
+				curl_offset.z = time * 5.5;
+
+				// Sampling terms
+				const float distance_to_travel = min(length(ws_atmosphere_end - ws_atmosphere_start), MAX_CLOUD_DISTANCE);
+				const float step_size = distance_to_travel/(float)(NUM_STEPS);
+				const float earth_radius_plus_clouds_start = EARTH_RADIUS + CLOUDS_START;
+				const float clouds_end_minus_clouds_start = CLOUDS_END - CLOUDS_START;
+				
+				// Note: By using a dithered pattern using pixel_pos % 4 we stay cache friendly when we update
+				// our quarter res buffers. 
+				float random_offset = dither_pattern[pixel_pos.x % 4][pixel_pos.y % 4] * 5.0;
+				float3 sample_pos = ws_atmosphere_start + ws_ray * random_offset;
+				float3 raymarch_start_pos = sample_pos;
+
+				// Weighted averages
+				float weighted_num_steps = 0.0;
+				float weighted_num_steps_sum = 0.000001;
+				float weighted_extinction_altitude = 1.0; 
+				float weighted_extinction_altitude_sum = 0.000001; 
+
+				// Absorbtion and Scattering terms
+				int i = 0;
+				float extinction = 1.0;
+				float3 scattering = 0.0;
+				WetnessTerms wt;
+
+				[loop]
+				while((extinction > CLOUD_DENSITY_THRESHOLD) && (i++ < NUM_STEPS)) {
+					
+					sample_pos = sample_pos + ws_ray * step_size;
+					float3 clouds_sampling_coord = get_clouds_sampling_pos(sample_pos + wind_offset);
+					float3 curl_sampling_coord = get_clouds_sampling_pos(sample_pos + wind_offset + curl_offset);
+					
+					#if defined(SAMPLE_WEATHER_DATA)
+						float2 weather_sampling_coord = get_weather_sampling_pos(sample_pos);
+						float4 weather_data = TEX2DLOD(input_texture3, weather_sampling_coord, 0);
+					#else
+						float4 weather_data = float4(clouds_coverage, clouds_type, clouds_wetness, 1.0);
+					#endif
+
+					float2 gradient_values = get_cloud_gradient(weather_data.g);
+					float altitude_scalar = get_altitude_scalar(weather_data.g);
+					update_wetness_terms(wt, weather_data.b);
+
+					float altitude = (length(sample_pos - EARTH_CENTER) - earth_radius_plus_clouds_start) / clouds_end_minus_clouds_start;
+					float extinction_altitude_scalar = lerp(1.0, wt.wetness_extinction_reducer, saturate(altitude * altitude_scalar));
+
+					float distance_from_origin = saturate(length(sample_pos.xy)/(MAX_CLOUD_DISTANCE * 2.0));
+					float view_dependent_lerp = saturate(distance_from_origin * 2.0);
+
+					float4 texture1 = TEX3DLOD(input_texture0, clouds_sampling_coord, 0.0);
+					float low_res_clouds = get_low_res_cloud(texture1, altitude, altitude_scalar, gradient_values, view_dependent_lerp, weather_data.r);
+					
+					float3 curl = get_curl_offset(input_texture2, curl_sampling_coord, clouds_advance_curl_amplitude, clouds_advance_curl_frequency);
+					float high_res_cloud = get_high_res_cloud(input_texture1, clouds_sampling_coord, low_res_clouds, curl, altitude, view_dependent_lerp, clouds_global_density, weather_data.g, wt.wetness_density_end_pos);
+
+					[flatten]
+					if(high_res_cloud <= CLOUD_DENSITY_THRESHOLD)
+						continue;
+
+					// Here we calculate a rough term for how much self occlusion occurs for that sample. We use
+					// 6 samples. The first 5 samples are close and the last one is placed further away.
+					float ligh_sample_extinction = 1.0;
+					[loop]
+					for(int k = 1; k <= 6; ++k) {
+						float far_sample_offset = (k==6) ? clouds_advance_extinction_distance : 0.0;
+						float self_shadowing_extinction = (k==6) ? wt.wetness_extinction_far : wt.wetness_extinction_near;
+						float3 light_sample_pos = sample_pos - raymarch_dir * (k * LIGHTING_SAMPLES_1TO5_STEP_SIZE + far_sample_offset);
+
+						float3 sample_wind_pos = light_sample_pos + wind_offset;
+						float3 clouds_sampling_coord = get_clouds_sampling_pos(sample_wind_pos);
+
+						#if defined(SAMPLE_WEATHER_DATA)
+							float2 weather_sampling_coord = get_weather_sampling_pos(light_sample_pos);
+							float4 weather_data = TEX2DLOD(input_texture3, weather_sampling_coord, 0);
+
+							float2 gradient_values = get_cloud_gradient(weather_data.g);
+							float altitude_scalar = get_altitude_scalar(weather_data.g);
+							update_wetness_terms(wt, weather_data.b);
+						#endif
+
+						float altitude = (length(light_sample_pos - EARTH_CENTER) - earth_radius_plus_clouds_start) / clouds_end_minus_clouds_start;
+						float extinction_altitude_scalar = lerp(1.0, wt.wetness_extinction_reducer, saturate(altitude * altitude_scalar));
+
+						// Make sure we don't add clouds if sampling above the atmosphere
+						if(altitude > 1.0)
+							break;
+
+						float4 texture1 = TEX3DLOD(input_texture0, clouds_sampling_coord, 0);
+						float low_res_clouds = get_low_res_cloud(texture1, altitude, altitude_scalar, gradient_values, view_dependent_lerp, weather_data.r);
+						float clouds_value = low_res_clouds;
+
+						[branch]
+						if(extinction > 0.3) {
+							// If are ray march is hasn't absorbed too much light yet, we use the high res cloud data to 
+							// calculate the self occlusion of the cloud
+							clouds_value = get_high_res_cloud(input_texture1, clouds_sampling_coord, low_res_clouds, 0, altitude, view_dependent_lerp, clouds_global_density, weather_data.g, wt.wetness_density_end_pos);
+						}
+
+						float extinction_coeff = extinction_altitude_scalar * self_shadowing_extinction * clouds_value;
+						float beers_term = exp(-extinction_coeff * LIGHTING_SAMPLES_1TO5_STEP_SIZE);
+
+						ligh_sample_extinction *= beers_term;
+					}
+
+					// Calculate the lighting coefficients 
+					float scattering_coeff = wt.wetness_scattering * high_res_cloud * ligh_sample_extinction;
+					float extinction_coeff = extinction_altitude_scalar * wt.wetness_extinction * high_res_cloud;
+					
+					// Out scattering
+					float powder_amount = lerp(wt.wetness_powder_near, wt.wetness_powder_far, view_dependent_lerp);
+					float powder_coeff = lerp(wt.wetness_powder_coef_near, wt.wetness_powder_coef_far, view_dependent_lerp) * high_res_cloud;
+
+					// Update absorbtion
+					float beers_term = exp(-extinction_coeff * step_size);
+					extinction *= beers_term;
+					//scattering_coeff *= get_atmosphere_shadow(altitude, -sun_direction);
+
+					// Update scattering
+					float3 ambient_color = get_ambient_color(altitude, extinction, input.ambient_bottom_color, input.ambient_top_color);
+					float powder_term = 1.0 - saturate(exp(-powder_coeff * step_size * 2.0) * powder_amount * saturate(altitude * 3.0));
+					float3 sample_scattering = scattering_coeff * step_size * sun_phase * powder_term * input.sun_color + ambient_color * powder_term;
+					scattering += extinction * sample_scattering;
+
+					// Update the weighted sums
+					float density_weight = (1.0 - beers_term);
+					float altitude_weight = (NUM_STEPS - i) * high_res_cloud;
+					
+					weighted_num_steps += i * density_weight;
+					weighted_extinction_altitude += altitude * altitude_weight;					
+					
+					weighted_num_steps_sum += density_weight;
+					weighted_extinction_altitude_sum += altitude_weight;
+				}
+
+				// Calculate the weighted sums
+				weighted_num_steps /= weighted_num_steps_sum;
+				weighted_extinction_altitude /= weighted_extinction_altitude_sum;
+				float3 closest_pos = weighted_num_steps_sum < CLOUD_DENSITY_THRESHOLD ? ws_atmosphere_end : raymarch_start_pos + ws_ray * step_size * weighted_num_steps;
+
+				#if defined(SAMPLE_WEATHER_DATA)
+					float high_altitude_cloud_coverage = input.per_frame_random_data.x;
+				#else
+					float high_altitude_cloud_coverage = clouds_advance_altitude_cloud_coverage;
+				#endif
+
+				//get_high_altitude_clouds_contribution(ws_atmosphere_start, input.sun_color, scattering, extinction, input.uv, high_altutude_sun_phase, high_altitude_cloud_coverage);
+
+				// Calculate the final color
+				scattering = -min(-scattering.rgb, 0.0);
+
+				// todo: Make this cache friendly and pre-caclulate it before starting the ray march (near raymarch_start_pos)
+				float2 weather_sampling_coord = get_weather_sampling_pos(raymarch_start_pos);
+				float3 clouds_sampling_coord = get_clouds_sampling_pos(raymarch_start_pos);
+				float4 texture1 = TEX3DLOD(input_texture0, clouds_sampling_coord, 0.0);
+				#if defined(SAMPLE_WEATHER_DATA)
+					float4 weather_data = TEX2DLOD(input_texture3, weather_sampling_coord, 0);
+				#else
+					float4 weather_data = float4(clouds_coverage, clouds_type, clouds_wetness, 1.0);
+				#endif
+				
+				float altitude_scalar = get_altitude_scalar(weather_data.g);
+				update_wetness_terms(wt, weather_data.b);
+
+				float4 final_color = get_final_color(scattering, extinction, wt.wetness_extinction_color, wt.wetness_extinction_blend, wt.wetness_bottom_darkening, weighted_extinction_altitude, altitude_scalar, input.extinction_color, wt.wetness_bottom_darkening_start);
+
+				// Calculate accurate cloud motion vectors
+				vs_prev_view = world_to_prev_view(closest_pos.xyz + wind_vector * 2.0, 1.0, 1.0);
+				ss_prev_view = view_to_ss(vs_prev_view, 1.0);
+				clouds_motion_vector = uv - ss_prev_view.xy;
+
+				to_return.buffer0 = final_color;
+				to_return.buffer1 = clouds_motion_vector;
+
+				float3 null = 0.0;
+				to_return.buffer0.rgb = preethams_sky(-sun_direction, ws_pos, length(ws_atmosphere_start) * sky_distance_clouds_scale, final_color.rgb, false, null);
+
+				return to_return;			
+			}
+		"""
+	}
+
+	generate_atmosphere = {
+		includes = ["common" "clouds_common" "space_conversion" "sky_common" "color_management" "gbuffer_access"]
+
+		samplers = {
+			input_texture0 = { sampler_states = "clamp_linear" }
+			input_texture1 = { sampler_states = "clamp_linear" }
+		}
+		
+		code="""
+			CBUFFER_START(c0)
+				float4x4 world_view_proj;
+				float3 sun_direction;
+				float sky_moon_disk_scale;
+				float sky_moon_glow;
+				float sky_horizon_offset;
+			CBUFFER_END
+
+			DECLARE_SAMPLER_2D(input_texture0);
+			DECLARE_SAMPLER_2D(input_texture1);
+
+			struct VS_INPUT {
+				float4 position : POSITION;
+				float2 uv : TEXCOORD0;
+			};
+
+			struct PS_INPUT {
+				float4 position : SV_POSITION;
+				float2 uv : TEXCOORD0;
+			};
+
+			float2 get_moon_uv_space(float2 uv){
+				float3 world_sunpos = sun_direction * SUN_DISTANCE;
+				float3 view_sunpos = world_to_view(world_sunpos, 1);
+				float3 ss_sunpos = view_to_ss(view_sunpos, 1);
+				float2 moon_space = (uv - ss_sunpos.xy) * float2(1.0, back_buffer_size.y/back_buffer_size.x);
+				return moon_space * (20.0 - sky_moon_disk_scale);
+			}
+
+			PS_INPUT vs_main(VS_INPUT input) {
+				PS_INPUT o;
+				o.position = mul(input.position, world_view_proj);
+				o.uv = input.uv;
+				return o;
+			}
+
+			float4 ps_main(PS_INPUT input) : SV_TARGET0 {
+				float cloud_alpha = TEX2D(input_texture0, input.uv).a;
+				float depth = TEX2D(input_texture1, input.uv).r;
+				cloud_alpha = saturate(cloud_alpha + (depth < 1.0));
+
+				float2 uv = input.uv;
+				uv.y += sky_horizon_offset;
+
+				float3 ss_pos = float3(uv, 0.0);
+				float3 view_pos = ss_to_view(ss_pos, 1.0);
+				float3 ws_pos = view_to_world(view_pos, 1.0, 1.0);
+				float3 ws_sun_dir = -sun_direction;
+				float3 ws_ray = normalize(ws_pos);
+				float3 null = 0.0;
+
+				// Fog
+				float fog = get_fog_factor(ws_ray.z);
+
+				float2 moon_space = get_moon_uv_space(input.uv) * 0.05;
+				float moon_distance_threshold = 0.01;
+				float moon_distance = (max(moon_distance_threshold, saturate(length(moon_space))) - moon_distance_threshold)/(1.0 - moon_distance_threshold);
+				float3 moon_color = lerp(sky_night_moon_color.rgb, 0, pow(saturate(moon_distance), 0.01));
+				moon_color = min(0.2, moon_color * sky_moon_glow);
+				moon_color *= get_night_time(sun_direction, 4.0, -0.25);
+				//moon_color *= dot(ws_ray, sun_direction) > 0.0;
+
+				float3 sky_color = preethams_sky(ws_sun_dir, ws_pos, 0.0, null, true, null) + moon_color * 0.1;
+				return float4(sky_color * saturate(1.0 - cloud_alpha) * fog, saturate(1.0 - cloud_alpha));  
+
+			}
+		"""
+	}
+
+	generate_godrays = {
+		includes = ["common" "clouds_common" "space_conversion" "sky_common" "color_management" "taa_offsets"]
+		
+		samplers = {
+			input_texture0 = { sampler_states = "clamp_linear" }
+			noise = { sampler_states = "wrap_point" }			
+		}
+
+		code="""
+			CBUFFER_START(c0)
+				float4x4 world_view_proj;
+				float3 sun_direction;
+				float clouds_godray_weight;
+				float clouds_advance_godray_density;
+				float clouds_advance_godray_decay;
+			CBUFFER_END
+
+			DECLARE_SAMPLER_2D(input_texture0);
+			DECLARE_SAMPLER_2D(noise);
+
+			struct VS_INPUT {
+				float4 position : POSITION;
+				float2 uv : TEXCOORD0;
+			};
+
+			struct PS_INPUT {
+				float4 position : SV_POSITION;
+				float2 uv : TEXCOORD0;
+			};
+
+			PS_INPUT vs_main(VS_INPUT input) {
+				PS_INPUT o;
+				o.position = mul(input.position, world_view_proj);
+				o.uv = input.uv;
+				return o;
+			}
+
+			float4 ps_main(PS_INPUT input) : SV_TARGET0 {
+				float2 ss_sampling_pos = input.uv;
+				float3 world_sunpos = get_raymarch_direction(sun_direction) * SUN_DISTANCE;
+				float3 view_sunpos = world_to_view(world_sunpos, 1);
+				float3 ss_sunpos = view_to_ss(view_sunpos, 1);
+
+				float dangerous_angle = acos(dot(normalize(view_sunpos), float3(0,1,0)))/PI;
+				float fade_godrays = saturate(abs(dangerous_angle - 0.5) * 4.0);
+
+				half2 ss_sampling_dir = (ss_sampling_pos - ss_sunpos.xy);
+
+				ss_sampling_dir = normalize(ss_sampling_dir) * min(1.0, (length(ss_sampling_dir)));
+				ss_sampling_dir *= clouds_advance_godray_density / NUM_GODRAY_SAMPLES;  
+				float4 color = TEX2D(input_texture0, ss_sampling_pos);
+				color.rgb = safe_range_tone_map(color.rgb) * color.a;
+
+				half illumination_decay = saturate(0.25 - normalize(view_sunpos).y); 
+
+				// Dither godrays
+				float2 offset = halton_offsets[frame_number % 8] * back_buffer_size.y/back_buffer_size.x * 4.0;
+				float3 noise_value = TEX2DLOD(noise, (input.uv + offset) * back_buffer_size/64.0, 0.0).rgb;
+				ss_sampling_pos -= ss_sampling_dir * noise_value.x;
+
+				for (int i = 0; i < NUM_GODRAY_SAMPLES; i++) {  
+					ss_sampling_pos -= ss_sampling_dir;  
+					
+					float4 sample = TEX2D(input_texture0, ss_sampling_pos);
+
+					// Attempt to keep the sun under control. Will need something better eventually (totally wrong since it clamp rgb independently(.
+					// sample.rgb = clamp(sample.rgb, 0.0, 0.1);
+
+					sample.rgb = safe_range_tone_map(sample.rgb) * sample.a;
+					color.rgb += sample.rgb * illumination_decay * clouds_godray_weight;  
+					
+					illumination_decay *= clouds_advance_godray_decay;
+				}  
+
+				color.rgb = inv_safe_range_tone_map(color.rgb) * fade_godrays;
+				return color;  
+
+			}
+		"""
+	}
+
+	merge_clouds_with_scene = {
+		includes = ["common" "clouds_common" "space_conversion" "sky_common" "color_management" "taa_offsets" "gbuffer_access"]
+		
+		samplers = {
+			input_texture0 = { sampler_states = "clamp_point" }
+			input_texture1 = { sampler_states = "clamp_point" }
+			input_texture2 = { sampler_states = "clamp_point" }
+			input_texture3 = { sampler_states = "clamp_linear" }
+			input_texture4 = { sampler_states = "mirror_linear" }			
+			sky_moon = { sampler_states = "clamp_linear" }			
+			noise = { sampler_states = "wrap_point" }			
+		}
+
+		code="""
+			CBUFFER_START(c0)
+				float4x4 world_view_proj;
+				float3 sun_direction;
+				float sky_moon_disk_scale;
+				float sky_star_twinkle;
+				float sky_milkyway_rotation;
+				float sky_milkyway_density;
+				float3 sky_stars_color1;
+				float3 sky_stars_color2;
+				float exposure;
+				float sky_horizon_offset;
+				float sky_distance_scales_position;
+				float2 sky_distance_scales;
+				float2 sky_distance_scales_noise;
+			CBUFFER_END
+
+			DECLARE_SAMPLER_2D(input_texture0);
+			DECLARE_SAMPLER_2D(input_texture1);
+			DECLARE_SAMPLER_2D(input_texture2);
+			DECLARE_SAMPLER_2D(input_texture3);
+			DECLARE_SAMPLER_3D(input_texture4);
+
+			DECLARE_SAMPLER_2D(sky_moon);
+			DECLARE_SAMPLER_2D(noise);
+
+			struct VS_INPUT {
+				float4 position : POSITION;
+				float2 uv : TEXCOORD0;
+			};
+
+			struct PS_INPUT {
+				float4 position : SV_POSITION;
+				float2 uv : TEXCOORD0;
+			};
+
+			PS_INPUT vs_main(VS_INPUT input) {
+				PS_INPUT o;
+				o.position = mul(input.position, world_view_proj);
+				o.uv = input.uv;
+				return o;
+			}
+
+			float2 get_moon_uv_space(float2 uv){
+				float3 world_sunpos = sun_direction * SUN_DISTANCE;
+				float3 view_sunpos = world_to_view(world_sunpos, 1);
+				float3 ss_sunpos = view_to_ss(view_sunpos, 1);
+				float2 moon_space = (uv - ss_sunpos.xy) * float2(1.0, back_buffer_size.y/back_buffer_size.x);
+				return moon_space * (20.0 - sky_moon_disk_scale);
+			}
+
+			float3 get_moon_color(float2 uv, float3 ws_ray) {
+				float2 moon_space = get_moon_uv_space(uv);
+				float3 moon_color = (length(moon_space) > 0.6) ? 0.0 : TEX2DLOD(sky_moon, (moon_space + 0.5), 0).rgb;
+				moon_color *= dot(ws_ray, sun_direction) > 0.0;
+
+				return moon_color * 1.1;
+			}
+
+			float3 get_stars_color(float3 ws_pos) {
+				float r = sky_milkyway_rotation * TWO_PI;
+				float3x3 rotation_matrix = {{cos(r), 0, sin(r)}, {0, 1, 0}, {-sin(r), 0, cos(r)}};
+				float3 ws_pos_rotated = mul(ws_pos * 15.0, rotation_matrix);
+				float fade_x = 2.0 - saturate(abs(ws_pos_rotated.x));
+				float fade_z = 1.0 - saturate(abs(ws_pos_rotated.z));
+				float milky_way = smoothstep(0, 1, saturate(fade_x * fade_z));
+				float2 spherical_uv = get_spherical_reflection_uvs(ws_pos);
+				float3 stars_sampling_pos = float3(spherical_uv * 1000.0 * float2(1.0, back_buffer_size.y/back_buffer_size.x), 0);
+
+				float cluster = set_range(perlin(stars_sampling_pos * 0.8), 0.1, 0.9);
+				float stars = set_range(get_perlin_5_octaves(stars_sampling_pos), 0.5, 1.7);
+				stars = pow(saturate(stars), 18.0 - sky_milkyway_density * milky_way * 3.0);
+				stars *= 0.5 + saturate(sin(time * 10.0 + cluster * 25.0)) * sky_star_twinkle;
+				stars *= saturate(1.0 - (spherical_uv.y + 0.4));
+
+				return lerp(sky_stars_color1, sky_stars_color2, cluster) * stars;
+			}
+
+			void add_noise(inout float3 clouds_color, inout float3 sky_color, float2 uv) {
+				float2 offset = halton_offsets[frame_number % 8] * back_buffer_size.y/back_buffer_size.x * 4.0;
+				float3 noise_value = TEX2DLOD(noise, (uv + offset) * back_buffer_size/64.0, 0.0).rgb;
+				noise_value = (noise_value - 0.5)/255.0;
+
+				clouds_color += noise_value * 0.25;
+				sky_color += noise_value * 0.5;
+			}
+
+			float4 ps_main(PS_INPUT input) : SV_TARGET0 {
+				float4 hdr0 = TEX2DLOD(input_texture0, input.uv, 0.0);
+				float depth = TEX2DLOD(input_texture1, input.uv, 0.0).r;
+				float4 godrays = TEX2DLOD(input_texture3, input.uv, 0.0);
+
+				bool render_clouds = (depth >= 1.0);
+				float d = render_clouds ? 1.0 : depth;
+				float2 uv = render_clouds ? input.uv + float2(0.0, sky_horizon_offset) : input.uv;
+				
+				float3 ss_pos = float3(uv, d);
+				float3 view_pos = ss_to_view(ss_pos, 1.0);
+				float3 ws_pos = view_to_world(view_pos, 1.0, render_clouds);
+				float3 ws_sun_dir = -sun_direction;
+				float3 ws_ray = normalize(ws_pos);
+				float3 null = 0.0;
+
+				float n = TEX3D(input_texture4, float3(ws_pos.xyz * sky_distance_scales_noise.x * 0.0001)).b * sky_distance_scales_noise.y * 500.0;
+
+				[branch]
+				if(render_clouds) {
+					// Fog
+					float fog = get_fog_factor(ws_ray.z);
+
+					// Calculate Preetham Sky
+					float3 sky_color = preethams_sky(ws_sun_dir, ws_pos, 0.0, null, true, null);
+					float4 clouds = TEX2DLOD(input_texture2, input.uv, 0.0);
+
+					float3 moon = get_moon_color(input.uv, ws_ray) * (1.0 - clouds.a);
+					float3 stars = get_stars_color(ws_pos) * saturate(1.0 - clouds.a * 1.5);
+					float3 astres = moon + stars;
+
+					astres *= get_night_time(sun_direction, 4.0, -0.25);
+					float astres_luminance = saturate(luminance(astres));
+
+					// We need to apply an aggressive tonemap range to make sure the sun disk 
+					// can be hidden by the clouds when we merge the preetham sky and the clouds
+					clouds.rgb = safe_range_tone_map_range(clouds.rgb, SKY_CLOUDS_MERGE_TONEMAP_RANGE);
+					sky_color = safe_range_tone_map_range(sky_color, SKY_CLOUDS_MERGE_TONEMAP_RANGE);
+					astres = safe_range_tone_map_range(astres, SKY_CLOUDS_MERGE_TONEMAP_RANGE);
+
+					// Before we add the stars, lets add noise to our two main terms
+					add_noise(clouds.rgb, sky_color, input.uv);
+
+					sky_color = lerp(sky_color, astres, astres_luminance);
+
+					float3 final_color = lerp(sky_color, clouds.rgb, clouds.a * fog);
+
+					final_color = inv_safe_range_tone_map_range(final_color, SKY_CLOUDS_MERGE_TONEMAP_RANGE);
+					final_color += godrays.rgb;
+
+					return float4(final_color, hdr0.a);
+				} else {
+					// Calculate Preetham Fog
+					float linear_depth = linearize_depth(depth);
+					float altitude = saturate((ws_pos.z + n)/sky_distance_scales_position);
+					float scattering_scale = lerp(sky_distance_scales.x, sky_distance_scales.y, altitude);
+					float3 final_color = preethams_sky(ws_sun_dir, ws_pos, linear_depth * scattering_scale, hdr0.rgb, false, null);
+					final_color.rgb += godrays.rgb * saturate(linear_depth/100.0);
+
+					return float4(final_color, hdr0.a);
+				}
+			}
+		"""
+	}
+
+	debug_clouds = {
+		includes = ["common" "clouds_common"]
+		
+		samplers = {
+			input_texture0 = { sampler_states = "mirror_linear" }
+			input_texture1 = { sampler_states = "mirror_linear" }
+			input_texture2 = { sampler_states = "mirror_linear" }
+		}
+
+		code="""
+			CBUFFER_START(c0)
+				float4x4 world_view_proj;
+				float clouds_type;
+			CBUFFER_END
+
+			DECLARE_SAMPLER_3D(input_texture0);
+			DECLARE_SAMPLER_3D(input_texture1);
+			DECLARE_SAMPLER_2D(input_texture2);
+
+			struct VS_INPUT {
+				float4 position : POSITION;
+				float2 uv : TEXCOORD0;
+			};
+
+			struct PS_INPUT {
+				float4 position : SV_POSITION;
+				float2 uv : TEXCOORD0;
+			};
+
+			PS_INPUT vs_main(VS_INPUT input) {
+				PS_INPUT o;
+				o.position = mul(input.position, world_view_proj);
+				o.uv = input.uv;
+				return o;
+			}
+
+			float4 get_debug_color(float v) {
+				if(v <= 0.0)
+					return float4(1,0,0,0);
+				else if(v >= 1.0)
+					return float4(0,1,0,0);
+				else
+					return float4(v,v,v,0);
+			}
+
+			float4 ps_main(PS_INPUT input) : SV_TARGET0 {
+
+				if(input.position.x > DEBUG_WIN_SIZE * 4){
+					float altitude = 1.0 - input.uv.y;
+					float cloud_type = (input.position.x - DEBUG_WIN_SIZE * 4)/(back_buffer_size.x - DEBUG_WIN_SIZE * 4);
+					float2 gradient_values = get_cloud_gradient(cloud_type);
+					return get_altitude_coverage(altitude, gradient_values);
+				}
+
+				float2 debug_width = back_buffer_size/float2(DEBUG_WIN_SIZE, DEBUG_WIN_SIZE);
+
+				float clouds_debug_view = (sin(time) + 1.0) * 0.5;
+				// Debug view for texture 1
+				if(input.position.y < DEBUG_WIN_SIZE) {
+					if(input.position.x < DEBUG_WIN_SIZE) {
+						float2 uv = input.uv * debug_width;
+						float4 texture1 = TEX3D(input_texture0, float3(uv, clouds_debug_view));
+						return get_debug_color(texture1.r);
+					}
+					else if(input.position.x < (DEBUG_WIN_SIZE * 2)) {
+						float2 uv = (input.uv - float2(1.0/debug_width.x, 0)) * debug_width;
+						float4 texture1 = TEX3D(input_texture0, float3(uv, clouds_debug_view));
+						return get_debug_color(1.0 - texture1.g);
+					}
+					else if(input.position.x < (DEBUG_WIN_SIZE * 3)) {
+						float2 uv = (input.uv - float2(2.0/debug_width.x, 0)) * debug_width;
+						float4 texture1 = TEX3D(input_texture0, float3(uv, clouds_debug_view));
+						return get_debug_color(1.0 - texture1.b);
+					}
+					else if(input.position.x < (DEBUG_WIN_SIZE * 4)) {
+						float2 uv = (input.uv - float2(3.0/debug_width.x, 0)) * debug_width;
+						float4 texture1 = TEX3D(input_texture0, float3(uv, clouds_debug_view));
+						return get_debug_color(1.0 - texture1.a);
+					}
+				}
+
+				// Debug view for texture 2
+				if(input.position.y < (DEBUG_WIN_SIZE * 2)) {
+					if(input.position.x < DEBUG_WIN_SIZE) {
+						float2 uv = (input.uv - float2(0, 1.0/debug_width.y)) * debug_width;
+						float4 texture1 = TEX3D(input_texture1, float3(uv, clouds_debug_view));
+						return get_debug_color(1.0 - texture1.r);
+					}
+					else if(input.position.x < (DEBUG_WIN_SIZE * 2)) {
+						float2 uv = (input.uv - float2(1.0/debug_width.x, 1.0/debug_width.y)) * debug_width;
+						float4 texture1 = TEX3D(input_texture1, float3(uv, clouds_debug_view));
+						return get_debug_color(1.0 - texture1.g);
+					}
+					else if(input.position.x < (DEBUG_WIN_SIZE * 3)) {
+						float2 uv = (input.uv - float2(2.0/debug_width.x, 1.0/debug_width.y)) * debug_width;
+						float4 texture1 = TEX3D(input_texture1, float3(uv, clouds_debug_view));
+						return get_debug_color(1.0 - texture1.b);
+					}
+					else if(input.position.x < (DEBUG_WIN_SIZE * 4)) {
+						float2 uv = (input.uv - float2(3.0/debug_width.x, 1.0/debug_width.y)) * debug_width;
+						float4 texture1 = TEX3D(input_texture1, float3(uv, clouds_debug_view));
+						return get_debug_color(1.0 - texture1.a);
+					}
+				}
+				
+				// Debug view for texture 3
+				if(input.position.y < (DEBUG_WIN_SIZE * 3)) {
+					if(input.position.x < DEBUG_WIN_SIZE) {
+						float2 uv = (input.uv - float2(0, 2.0/debug_width.y)) * debug_width;
+						float4 texture1 = TEX3D(input_texture2, float3(uv,0));
+						return get_debug_color(texture1.r);
+					}
+					else if(input.position.x < (DEBUG_WIN_SIZE * 2)) {
+						float2 uv = (input.uv - float2(1.0/debug_width.x, 2.0/debug_width.y)) * debug_width;
+						float4 texture1 = TEX3D(input_texture2, float3(uv,0));
+						return get_debug_color(texture1.g);
+					}
+					else if(input.position.x < (DEBUG_WIN_SIZE * 3)) {
+						float2 uv = (input.uv - float2(2.0/debug_width.x, 2.0/debug_width.y)) * debug_width;
+						float4 texture1 = TEX3D(input_texture2, float3(uv,0));
+						return get_debug_color(texture1.b);
+					}
+				}
+
+				return 0;
+			}
+		"""
+	}
+
+	debug_weather = {		
+ 		includes = [ "common" "clouds_common"]
+ 
+ 		samplers = {
+			input_texture0 = { sampler_states = "clamp_linear" }
+		}
+
+ 		code="""
+			DECLARE_SAMPLER_2D(input_texture0);
+
+ 			struct VS_INPUT {
+ 				float4 position : POSITION;
+ 				float2 uv : TEXCOORD0;				
+ 			};
+ 			
+ 			struct PS_INPUT {
+ 				float4 position : SV_POSITION;
+ 				float2 uv : TEXCOORD0;
+ 			};			 			
+ 			
+ 			CBUFFER_START(c0)
+ 				float2   input_texture0_size;
+ 				float4x4 world_view_proj;
+ 				float clouds_global_density;
+ 			CBUFFER_END	
+ 			
+ 			PS_INPUT vs_main(VS_INPUT input)
+ 			{
+ 				PS_INPUT o;
+ 				o.position = mul( input.position, world_view_proj );				
+ 				o.uv = input.uv;
+ 				return o;
+ 			}
+  
+ 			float4 ps_main( PS_INPUT input ) : SV_TARGET0 {
+				int y_offset = 20;
+				float2 centered_uv1 = (float2(input.position.x - 20, back_buffer_size.y - (input.position.y + y_offset)) / float2(input_texture0_size)) - 0.5;
+				float2 centered_uv2 = (float2(input.position.x - 280, back_buffer_size.y - (input.position.y + y_offset)) / float2(input_texture0_size)) - 0.5;
+				float2 centered_uv3 = (float2(input.position.x - 540, back_buffer_size.y - (input.position.y + y_offset)) / float2(input_texture0_size)) - 0.5;
+				float2 centered_uv4 = (float2(input.position.x - 800, back_buffer_size.y - (input.position.y + y_offset)) / float2(input_texture0_size)) - 0.5;
+				
+				// Compute UV rotation to apply based on cam look direction
+				float2 cam_view_dir = normalize(camera_world._m10_m11 + float2(0, 0.00001));
+
+				float angle = acos(dot(cam_view_dir, float2(0, 1)));
+				angle *= sign(cam_view_dir.x);
+				angle += clouds_angle -	PI * 0.5;
+				float2x2 rotation = {cos(angle), -sin(angle), sin(angle), cos(angle)};
+				
+				if (length(centered_uv1) < 0.5)
+				{
+					float4 weather_data = TEX2D(input_texture0, (mul(centered_uv1, rotation) + 0.5));
+					return float4(weather_data.r, 0, 0, 1);
+				}
+				else if (length(centered_uv2) < 0.5)
+				{
+					float4 weather_data = TEX2D(input_texture0, (mul(centered_uv2, rotation) + 0.5));
+					return float4(0, weather_data.g, 0, 1);
+				}
+				else if (length(centered_uv3) < 0.5)
+				{
+					float4 weather_data = TEX2D(input_texture0, (mul(centered_uv3, rotation) + 0.5));
+					return float4(0, 0, weather_data.b, 1);
+				}
+				else if (length(centered_uv4) < 0.5)
+				{
+
+					float2 uv = (length(centered_uv4) < 0.1) ? float2(0.0, 0.0) : centered_uv4;
+
+					float3 per_frame_random_data = float3(0,0,0);
+					calculate_per_frame_random_data(per_frame_random_data, clouds_time, clouds_wind_speed, clouds_global_density, uv);
+					float x = per_frame_random_data.x/2.0;
+					float y = per_frame_random_data.y;
+					float z = (per_frame_random_data.z * rcp(UP_DOWN_DRAFT_RANGE));
+
+					float4 weather_data = TEX2D(input_texture0, (mul(centered_uv4, rotation) + 0.5));
+					float v = weather_data.a;
+					return float4(v, v, v, 1);
+				}
+
+				return 0;
+			}	
+		"""
+	}
+}
+
+shaders = {
+	generate_clouds = {
+		editor_advanced_mode = true
+
+		contexts = {
+			default = {
+				passes_sort_mode="immediate"
+				passes = [
+					{ hlsl_shader="generate_clouds" }
+				]
+			}
+		}
+
+		compile = {
+			default = [
+				{ defines=[""] }
+			]
+		}
+	}
+
+	// todo: This would probably be a good fit to be a compute shader
+	generate_weather_data = {
+		editor_advanced_mode = true
+
+		contexts = {
+			default = {
+				passes_sort_mode="immediate"
+				passes = [
+					{ hlsl_shader="generate_weather_data" }
+				]
+			}
+		}
+
+		compile = {
+			default = [
+				{ defines=[""] }
+			]
+		}
+	}
+
+	raymarch_clouds = {
+		editor_advanced_mode = true
+
+		contexts = {
+			default = {
+				passes_sort_mode="immediate"
+				passes = [
+					{ hlsl_shader="raymarch_clouds" }
+				]
+			}
+		}
+
+		compile = {
+			default = [
+				{ defines=[""] }
+			]
+		}
+	}
+
+	reproject_clouds = {
+		editor_advanced_mode = true
+
+		contexts = {
+			default = {
+				passes_sort_mode="immediate"
+				passes = [
+					{ hlsl_shader="reproject_clouds" }
+				]
+			}
+		}
+
+		compile = {
+			default = [
+				{ defines=[""] }
+			]
+		}
+	}
+
+	generate_atmosphere = {
+		editor_advanced_mode = true
+
+		contexts = {
+			default = {
+				passes_sort_mode="immediate"
+				passes = [
+					{ hlsl_shader="generate_atmosphere" }
+				]
+			}
+		}
+
+		compile = {
+			default = [
+				{ defines=[""] }
+			]
+		}
+	}
+
+	generate_godrays = {
+		editor_advanced_mode = true
+
+		contexts = {
+			default = {
+				passes_sort_mode="immediate"
+				passes = [
+					{ hlsl_shader="generate_godrays" }
+				]
+			}
+		}
+
+		compile = {
+			default = [
+				{ defines=[""] }
+			]
+		}
+	}
+
+	merge_clouds_with_scene = {
+		editor_advanced_mode = true
+
+		contexts = {
+			default = {
+				passes_sort_mode="immediate"
+				passes = [
+					{ hlsl_shader="merge_clouds_with_scene" }
+				]
+			}
+		}
+
+		compile = {
+			default = [
+				{ defines=[""] }
+			]
+		}
+	}
+
+	debug_clouds = {
+		editor_advanced_mode = true
+
+		contexts = {
+			default = {
+				passes_sort_mode="immediate"
+				passes = [
+					{ hlsl_shader="debug_clouds" }
+				]
+			}
+		}
+
+		compile = {
+			default = [
+				{ defines=[""] }
+			]
+		}
+	}
+
+	debug_weather = {
+		editor_advanced_mode = true
+
+		contexts = {
+			default = {
+				passes_sort_mode="immediate"
+				passes = [
+					{ hlsl_shader="debug_weather" render_states="additive_state" }
+				]
+			}
+		}
+
+		compile = {
+			default = [
+				{ defines=[] }
+			]
+		}
+	}
+}
+
+static_compile= [
+	{ if: "on_renderer(D3D11)" shader="generate_clouds" defines=["TEXTURE1"] }
+	{ if: "on_renderer(D3D11)" shader="generate_clouds" defines=["TEXTURE2"] }
+	{ if: "on_renderer(D3D11)" shader="generate_clouds" defines=["TEXTURE3"] }
+	{ if: "on_renderer(D3D11)" shader="generate_weather_data" defines=["RANDOM"] }
+	{ if: "on_renderer(D3D11)" shader="generate_weather_data" defines=["SCRIPTED"] }
+	{ if: "on_renderer(D3D11)" shader="raymarch_clouds" }
+	{ if: "on_renderer(D3D11)" shader="raymarch_clouds" defines=["SAMPLE_WEATHER_DATA"] }
+	{ if: "on_renderer(D3D11)" shader="reproject_clouds" }
+	{ if: "on_renderer(D3D11)" shader="generate_atmosphere" }
+	{ if: "on_renderer(D3D11)" shader="generate_godrays" }
+	{ if: "on_renderer(D3D11)" shader="merge_clouds_with_scene" }
+	{ if: "on_renderer(D3D11)" shader="debug_clouds" }
+	{ if: "on_renderer(D3D11)" shader="debug_weather" }
+
+]
