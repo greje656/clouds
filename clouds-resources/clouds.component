@@ -17,6 +17,13 @@ types = {
                     visible = false
                 }
             }
+            clouds_enabled = {
+                type = ":bool"
+                default = true
+                editor = {
+                    label = "Enabled"
+                }
+            }
             clouds_coverage = {
                 type = ":number"
                 default = 0.6

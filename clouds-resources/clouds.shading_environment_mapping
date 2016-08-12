@@ -1,4 +1,5 @@
 shading_component_mapping = {
+	clouds_enabled = { type="scalar" path=["clouds_enabled"]  }
 	clouds_coverage = { type="scalar" path=["clouds_coverage"]  }
 	clouds_type = { type="scalar" path=["clouds_type"]  }
 	clouds_wetness = { type="scalar" path=["clouds_wetness"]  }
