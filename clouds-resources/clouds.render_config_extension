@@ -1,0 +1,104 @@
+append = {	
+	render_settings = {
+		clouds_enabled = true
+		clouds_raw_data_visualization = false
+		clouds_weather_data_visualization = false
+	}
+
+	shader_libraries = [
+		"clouds-resources/clouds"		
+	]
+
+	global_resources = [
+		{ type="static_branch" render_settings={ clouds_enabled=true }
+			pass = [
+				// Clouds modelling resources:
+				{ name="clouds_result_texture1" type="render_target" image_type="image_3d" width=256 height=256 layers=256 format="R8G8B8A8" }
+				{ name="clouds_result_texture2" type="render_target" image_type="image_3d" width=64 height=64 layers=64 format="R8G8B8A8" }
+				{ name="clouds_result_texture3" type="render_target" image_type="image_2d" width=128 height=128 format="R8G8B8A8" }
+				{ name="clouds_weather_texture" type="render_target" image_type="image_2d" width=256 height=256 format="R8G8B8A8" }
+
+				// Clouds rendering resources:
+				{ name="clouds_buffer" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R16G16B16A16F" }
+				{ name="clouds_buffer_low_res" type="render_target" depends_on="output_target" w_scale=0.25 h_scale=0.25 format="R16G16B16A16F" }
+				{ name="clouds_motion_vectors" type="render_target" depends_on="output_target" w_scale=0.25 h_scale=0.25 format="R16G16F" }
+				{ name="clouds_atmosphere" type="render_target" depends_on="output_target" w_scale=0.25 h_scale=0.25 format="R16G16B16A16F" }
+				{ name="clouds_godrays" type="render_target" depends_on="output_target" w_scale=0.5 h_scale=0.5 format="R16G16B16A16F" }
+				{ name="clouds_history_buffer" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R16G16B16A16F" }
+			]
+		}
+	]
+
+	resource_generators = {
+		clouds_modifier = {
+			modifiers = [
+				{ type="dynamic_branch" shading_environment={ clouds_enabled = true }
+					pass = [
+						{ type="dynamic_branch" shading_environment={ clouds_enable_weather=true }
+							pass = [
+								{ type="dynamic_branch" shading_environment={ clouds_enable_scripted=true }
+									pass = [
+										{ type="fullscreen_pass" shader="generate_weather_data:SCRIPTED" output=["clouds_weather_texture"] profiling_scope="clouds_weather" }
+									] fail = [
+										{ type="fullscreen_pass" shader="generate_weather_data:RANDOM" output=["clouds_weather_texture"] profiling_scope="clouds_weather" }
+									]
+								}
+
+								{ type="fullscreen_pass" shader="raymarch_clouds:SAMPLE_WEATHER_DATA" input=["clouds_result_texture1" "clouds_result_texture2" "clouds_result_texture3" "clouds_weather_texture"] output=["clouds_buffer_low_res" "clouds_motion_vectors"] profiling_scope="clouds_raymarch" }
+
+							] fail = [
+								{ type="fullscreen_pass" shader="raymarch_clouds" input=["clouds_result_texture1" "clouds_result_texture2" "clouds_result_texture3" "clouds_weather_texture"] output=["clouds_buffer_low_res" "clouds_motion_vectors"] profiling_scope="clouds_raymarch" }
+							]
+						}
+						{ type="fullscreen_pass" shader="reproject_clouds" input=["clouds_buffer_low_res" "clouds_history_buffer" "clouds_motion_vectors"] output=["clouds_buffer"] profiling_scope="clouds_reprojec" }
+						{ type="fullscreen_pass" shader="generate_atmosphere" input=["clouds_buffer" "depth_stencil_buffer"] output=["clouds_atmosphere"] }
+						{ type="fullscreen_pass" shader="generate_godrays" input=["clouds_atmosphere"] output=["clouds_godrays"] }
+						{ type="fullscreen_pass" shader="merge_clouds_with_scene" input=["hdr0" "depth_stencil_buffer" "clouds_buffer" "clouds_godrays"  "clouds_result_texture1"] output=["hdr0"] }
+						{ type="fullscreen_pass" shader="copy" input=["clouds_buffer"] output=["clouds_history_buffer"]  profiling_scope="clouds_copy" }
+					]
+				}
+			]
+		}
+
+		// Clouds Compute Shaders
+		cloud_generator_texture1 = {
+			modifiers = [
+				{ type="compute_kernel" shader="generate_clouds:TEXTURE1" thread_count_x="output" thread_count_y="output" thread_count_z="output" thread_count_divider=[8 8 8]  }
+			]		
+		}
+		cloud_generator_texture2 = {
+			modifiers = [
+				{ type="compute_kernel" shader="generate_clouds:TEXTURE2" thread_count_x="output" thread_count_y="output" thread_count_z="output" thread_count_divider=[8 8 8]  }
+			]		
+		}
+		cloud_generator_texture3 = {
+			modifiers = [
+				{ type="compute_kernel" shader="generate_clouds:TEXTURE3" thread_count_x="output" thread_count_y="output" thread_count_z=1 thread_count_divider=[16 16 1]  }
+			]		
+		}
+	}
+}
+
+insert_at = {
+	post_processing_development = { 
+		modifiers = [
+			{ type="dynamic_branch" render_settings={ clouds_weather_data_visualization=true }
+				pass = [
+					{ type="fullscreen_pass" shader="debug_weather" input=["clouds_weather_texture"] output=["output_target"]  }
+				]
+			}
+
+			{ type="dynamic_branch" render_settings={ clouds_raw_data_visualization=true }
+				pass = [
+					{ type="fullscreen_pass" shader="debug_clouds" input=["clouds_result_texture1" "clouds_result_texture2" "clouds_result_texture3"] output=["output_target"] }
+				]
+			}
+		]
+	}
+
+	skydome = { 
+		layers = [
+			{ resource_generator="clouds_modifier" profiling_scope="clouds" }
+		]
+	}
+}
