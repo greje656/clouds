@@ -78,7 +78,7 @@ hlsl_shaders = {
 				int2(2,2), int2(1,3), int2(3,0), int2(0,2)
 			};
 
-			static float2 gradient_stratocumulus = float2(0.1, 0.5);
+			static float2 gradient_stratocumulus = float2(0.1, 0.2);
 			static float2 gradient_cumulus = float2(0.2, 1.0);
 			static float2 gradient_cumulonimbus = float2(0.75, 1.0);
 
@@ -302,6 +302,24 @@ hlsl_shaders = {
 				perlin_value += a * perlin(xyz).r; a *= amplitude_factor; xyz *= (frequency_factor + 0.03);
 				perlin_value += a * perlin(xyz).r; a *= amplitude_factor; xyz *= (frequency_factor + 0.01);
 				perlin_value += a * perlin(xyz).r; a *= amplitude_factor; xyz *= (frequency_factor + 0.01);
+				perlin_value += a * perlin(xyz).r;
+
+				return perlin_value;
+			}
+
+			float get_perlin_7_octaves(float3 p, float3 offset = 0) {
+				float3 xyz = p + offset;
+				float amplitude_factor = 0.5; //707f; 
+				float frequency_factor = 2.0; //5789f;
+
+				float a = 1.0;
+				float perlin_value = 0.0;
+				perlin_value += a * perlin(xyz).r; a *= amplitude_factor; xyz *= (frequency_factor + 0.02);
+				perlin_value += a * perlin(xyz).r; a *= amplitude_factor; xyz *= (frequency_factor + 0.03);
+				perlin_value += a * perlin(xyz).r; a *= amplitude_factor; xyz *= (frequency_factor + 0.01);
+				perlin_value += a * perlin(xyz).r; a *= amplitude_factor; xyz *= (frequency_factor + 0.01);
+				perlin_value += a * perlin(xyz).r; a *= amplitude_factor; xyz *= (frequency_factor + 0.02);
+				perlin_value += a * perlin(xyz).r; a *= amplitude_factor; xyz *= (frequency_factor + 0.03);
 				perlin_value += a * perlin(xyz).r;
 
 				return perlin_value;
@@ -651,7 +669,7 @@ hlsl_shaders = {
 				// The single most important value to get right. All other values should be hardcoded,
 				// but it would be nice to have this one exposed as a [0,1] slider. It controls how 
 				// fluffy (perlin) or billowy (worley) the clouds look
-				float perlin_to_worley_ratio    =  0.5;
+				float perlin_to_worley_ratio    =  0.2;
 
 				// Texture 1
 				float texture1_scale            =  2.0; 
@@ -694,7 +712,7 @@ hlsl_shaders = {
 
 					// Build the perlin and worley noise of each channel of the first 3d texture. Each stage is
 					// has it's values remmaped to a range which exploits the RGBA8 efficiently
-					float perlin_r = get_perlin_5_octaves(xyz * texture1_perlin_scale,                                  worley_perlin_offset);
+					float perlin_r = get_perlin_7_octaves(xyz * texture1_perlin_scale,                                  worley_perlin_offset);
 					float worley_r = get_worley_3_octaves(xyz * texture1_worley_scale,                                  worley_offset1 * 1.0);
 					float worley_g = get_worley_3_octaves(xyz * texture1_worley_scale * texture1_frequency_scale * 1.0, worley_offset1 * 2.0);
 					float worley_b = get_worley_3_octaves(xyz * texture1_worley_scale * texture1_frequency_scale * 2.0, worley_offset1 * 3.0);
@@ -1169,9 +1187,9 @@ hlsl_shaders = {
 			}
 			
 
-			float3 get_curl_offset(Sampler2D tex, in float3 pos, float curl_amplitude, float curl_frequency){
+			float3 get_curl_offset(Sampler2D tex, in float3 pos, float curl_amplitude, float curl_frequency, float altitude){
 				float4 curl_data = TEX2DLOD(tex, pos.xy * curl_frequency, 0.0);
-				return decode_curl(curl_data.rgb) * curl_amplitude;
+				return decode_curl(curl_data.rgb) * curl_amplitude * (1.0 - altitude);
 			}
 			
 			void get_high_altitude_clouds_contribution(float3 pos, float3 sun_color, inout float3 scattering, inout float extinction, float2 uv, float sun_phase, float coverage){
@@ -1356,7 +1374,7 @@ hlsl_shaders = {
 					float4 texture1 = TEX3DLOD(input_texture0, clouds_sampling_coord, 0.0);
 					float low_res_clouds = get_low_res_cloud(texture1, altitude, altitude_scalar, gradient_values, view_dependent_lerp, weather_data.r);
 					
-					float3 curl = get_curl_offset(input_texture2, curl_sampling_coord, clouds_advance_curl_amplitude, clouds_advance_curl_frequency);
+					float3 curl = get_curl_offset(input_texture2, curl_sampling_coord, clouds_advance_curl_amplitude, clouds_advance_curl_frequency, altitude);
 					float high_res_cloud = get_high_res_cloud(input_texture1, clouds_sampling_coord, low_res_clouds, curl, altitude, view_dependent_lerp, clouds_global_density, weather_data.g, wt.wetness_density_end_pos);
 
 					[flatten]
