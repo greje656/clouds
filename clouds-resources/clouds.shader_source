@@ -1199,9 +1199,9 @@ hlsl_shaders = {
 			}
 			
 
-			float3 get_curl_offset(Sampler2D tex, in float3 pos, float curl_amplitude, float curl_frequency){
+			float3 get_curl_offset(Sampler2D tex, in float3 pos, float curl_amplitude, float curl_frequency, float altitude){
 				float4 curl_data = TEX2DLOD(tex, pos.xy * curl_frequency, 0.0);
-				return decode_curl(curl_data.rgb) * curl_amplitude;
+				return decode_curl(curl_data.rgb) * curl_amplitude * (1.0 - altitude);
 			}
 			
 			void get_high_altitude_clouds_contribution(float3 pos, float3 sun_color, inout float3 scattering, inout float extinction, float2 uv, float sun_phase, float coverage){
@@ -1387,7 +1387,7 @@ hlsl_shaders = {
 					float4 texture1 = TEX3DLOD(input_texture0, clouds_sampling_coord, 0.0);
 					float low_res_clouds = get_low_res_cloud(texture1, altitude, altitude_scalar, gradient_values, view_dependent_lerp, weather_data.r, fade_term);
 					
-					float3 curl = get_curl_offset(input_texture2, curl_sampling_coord, clouds_advance_curl_amplitude, clouds_advance_curl_frequency);
+					float3 curl = get_curl_offset(input_texture2, curl_sampling_coord, clouds_advance_curl_amplitude, clouds_advance_curl_frequency, altitude);
 					float high_res_cloud = get_high_res_cloud(input_texture1, clouds_sampling_coord, low_res_clouds, curl, altitude, view_dependent_lerp, clouds_global_density, weather_data.g, wt.wetness_density_end_pos);
 
 					[flatten]
