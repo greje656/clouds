@@ -29,10 +29,10 @@ types = {
             }
             sky_distance_scales = {
                 type = "core/types/range"
-                default = [200.0, 150.0]
+                default = [0.0, 150.0]
                 value = {
                     type = ":number"
-                    min = 0.01
+                    min = 0.0
                     max = 400.0
                     editor = {
                         step = 1.0
@@ -69,7 +69,7 @@ types = {
             }
             sky_fog_fade = {
                 type = ":number"
-                default = 20.0
+                default = 8.0
                 min = 0.0
                 max = 200
                 editor = {

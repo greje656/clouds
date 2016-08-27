@@ -19,7 +19,7 @@ types = {
             }
             clouds_advance_ambient_top = {
                 type = ":number"
-                default = 0.05
+                default = 0.0
                 min = 0.0
                 max = 0.5
                 editor = {
@@ -29,7 +29,7 @@ types = {
             }
             clouds_advance_ambient_bottom = {
                 type = ":number"
-                default = 0.002
+                default = 0.0
                 min = 0.0
                 max = 0.5
                 editor = {
@@ -50,7 +50,7 @@ types = {
             clouds_advance_extinction_color1 = {
                 type = "core/types/color"
                 fields = {
-                    rgb = { default = [1.0, 1.0, 1.0] }
+                    rgb = { default = [0.22, 0.3, 0.42] }
                     alpha = { default = 1.0 }
                     intensity = { default = 1.0 }
                 }
@@ -97,7 +97,7 @@ types = {
             }
             clouds_advance_extinction_distance = {
                 type = ":number"
-                default = 0.0
+                default = 150.0
                 min = 0.0
                 max = 200.0
                 editor = {
@@ -122,7 +122,7 @@ types = {
             }
             clouds_advance_bottom_darkening = {
                 type = "core/types/range"
-                default = [0.2, 0.01]
+                default = [0.7, 0.01]
                 value = {
                     type = ":number"
                     min = 0.0
@@ -137,7 +137,7 @@ types = {
             }
             clouds_advance_extinction = {
                 type = "core/types/range"
-                default = [1.0, 1.0]
+                default = [0.75, 1.0]
                 value = {
                     type = ":number"
                     min = 0.0
@@ -197,7 +197,7 @@ types = {
             }
             clouds_advance_scattering = {
                 type = "core/types/range"
-                default = [20, 5]
+                default = [80, 5]
                 value = {
                     type = ":number"
                     min = 0.0
@@ -212,7 +212,7 @@ types = {
             }
             clouds_advance_extinction_color_scalar = {
                 type = "core/types/range"
-                default = [0.5, 0.05]
+                default = [1.0, 0.05]
                 value = {
                     type = ":number"
                     min = 0.0
@@ -227,7 +227,7 @@ types = {
             }
             clouds_advance_powder_amount_near = {
                 type = "core/types/range"
-                default = [1.5, 1.0]
+                default = [1.2, 1.2]
                 value = {
                     type = ":number"
                     min = 0.0
@@ -242,7 +242,7 @@ types = {
             }
             clouds_advance_powder_amount_far = {
                 type = "core/types/range"
-                default = [1.5, 1.5]
+                default = [1.2, 1.2]
                 value = {
                     type = ":number"
                     min = 0.0
@@ -257,7 +257,7 @@ types = {
             }
             clouds_advance_powder_coef_near = {
                 type = "core/types/range"
-                default = [2.0, 2.0]
+                default = [3.0, 2.0]
                 value = {
                     type = ":number"
                     min = 0.5
@@ -332,7 +332,7 @@ types = {
             }
             clouds_advance_erode_scale = {
                 type = ":number"
-                default = 9
+                default = 6
                 min = 1.0
                 max = 20.0
                 editor = {
@@ -342,7 +342,7 @@ types = {
             }                      
             clouds_advance_erode_low = {
                 type = "core/types/range"
-                default = [0.2, 0.3]
+                default = [0.3, 0.3]
                 value = {
                     type = ":number"
                     min = 0.0
@@ -357,7 +357,7 @@ types = {
             }
             clouds_advance_erode_high = {
                 type = "core/types/range"
-                default = [0.15, 0.15]
+                default = [0.3, 0.3]
                 value = {
                     type = ":number"
                     min = 0.0
@@ -372,7 +372,7 @@ types = {
             }
             clouds_advance_curl_amplitude = {
                 type = ":number"
-                default = 0.025
+                default = 0.05
                 min = 0.0
                 max = 0.5
                 editor = {
@@ -382,7 +382,7 @@ types = {
             }
             clouds_advance_curl_frequency = {
                 type = ":number"
-                default = 20.0
+                default = 10.0
                 min = 0.0
                 max = 30.0
                 editor = {
@@ -403,7 +403,7 @@ types = {
             }
             clouds_advance_altitude_cloud_scale = {
                 type = "core/types/range"
-                default = [2, 4]
+                default = [2, 2]
                 value = {
                     type = ":number"
                     min = 1
@@ -426,7 +426,7 @@ types = {
             }
             clouds_advance_altitude_cloud_coverage = {
                 type = ":number"
-                default = 0.75
+                default = 0.7
                 min = 0
                 max = 3
                 editor = {
