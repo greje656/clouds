@@ -121,7 +121,7 @@ types = {
             }
             clouds_wind_speed = {
                 type = ":number"
-                default = 0.1
+                default = 0.0
                 min = 0.0
                 max = 4.0
                 editor = {

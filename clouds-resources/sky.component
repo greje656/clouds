@@ -79,7 +79,7 @@ types = {
             }
             sky_horizon_offset = {
                 type = ":number"
-                default = 0.2
+                default = 0.1
                 min = -0.5
                 max = 0.5
                 editor = {
