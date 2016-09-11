@@ -79,7 +79,7 @@ hlsl_shaders = {
 
 			static float2 gradient_stratocumulus = float2(0.1, 0.3);
 			static float2 gradient_cumulus = float2(0.2, 1.0);
-			static float2 gradient_cumulonimbus = float2(0.75, 1.0);
+			static float2 gradient_cumulonimbus = float2(0.95, 1.0);
 
 			CBUFFER_START(c_clouds_common)
 				float clouds_angle;
@@ -824,33 +824,40 @@ hlsl_shaders = {
 
  				#if defined(RANDOM)
 	 				float z_offset1 = 0.0;
-	 				float z_offset2 = 100.0;
+	 				float z_offset2 = 500.0;
+	 				float z_offset3 = 100.0;
+	 				float z_offset4 = 200.0;
 
-	 				float3 sampling_pos1 = float3(input.uv + xy_offset1, z_offset1) * 1.5;
-	 				float3 sampling_pos2 = float3(input.uv + xy_offset2, z_offset2) * 0.1;
+	 				float3 sampling_pos1 = float3(input.uv + xy_offset1, z_offset1) * 2.0;
+	 				float3 sampling_pos2 = float3(input.uv + xy_offset2, z_offset2) * 4.0;
+	 				float3 sampling_pos3 = float3(input.uv + xy_offset2, z_offset3) * 5.5;
+	 				float3 sampling_pos4 = float3(input.uv + xy_offset2, z_offset4) * 2.0;
+
 	 				float signal1 = get_perlin_5_octaves(sampling_pos1, 0.0);
 	 				float signal2 = get_perlin_5_octaves(sampling_pos2, 0.0);
+	 				float signal3 = get_perlin_5_octaves(sampling_pos3, 0.0);
+	 				float signal4 = get_perlin_5_octaves(sampling_pos4, 0.0);
 	 				
-	 				float v1 = set_range(signal1, 0.5, 1.3);
-	 				float v2 = set_range(signal2, 0.5, 1.3);
+	 				float perlin1 = set_range(signal1, 0.5, 1.3);
+	 				float perlin2 = set_range(signal2, 0.5, 1.3);
+	 				float perlin3 = set_range(signal3, 0.5, 1.3);
+	 				float perlin4 = set_range(signal4, 0.5, 1.3);
 
-	 				float global_weather = saturate((lerp(1.0, 0.0, pow(v2, 0.5)) - 0.3) * 5.0);
+	 				perlin1 = pow(perlin1, 0.75);
+	 				perlin2 = pow(perlin2, 1.00);
+	 				perlin3 = pow(perlin3, 1.00);
+	 				perlin4 = pow(perlin4, 0.50);
 
-	 				float2 p1_sunny = float2(0.2, 0.75);
-	 				float2 p1_rainy = float2(0.0, 0.00);
-	 				float2 p2_sunny = float2(1.5, 0.20);
-	 				float2 p2_rainy = float2(1.5, 1.00);
-	 				float2 p3_sunny = float2(0.5, 0.00);
-	 				float2 p3_rainy = float2(1.0, 0.75);
+	 				perlin1 = saturate(perlin1 * 1.2) * 0.5;
+	 				perlin2 = saturate(perlin2 * 1.0) * 0.5;
+	 				perlin3 = saturate(perlin3 * 1.0) * 0.5;
+	 				perlin4 = saturate(1.0 - perlin4 * 2.0);
 
-	 				float2 p1 = lerp(p1_sunny, p1_rainy, global_weather);
-	 				float2 p2 = lerp(p2_sunny, p2_rainy, global_weather);
-	 				float2 p3 = lerp(p3_sunny, p3_rainy, global_weather);
-	 				float perlin1 = lerp(p1.x, p1.y, pow(v1, 0.3));
-	 				float perlin2 = lerp(p2.x, p2.y, pow(v1, 0.5));
-	 				float perlin3 = lerp(p3.x, p3.y, pow(v1, 0.5));;
+	 				perlin1 -= perlin4 * 0.5;
+	 				perlin2 += perlin4 * 2.0;
+	 				perlin3 += perlin4 * 1.0;
 
-					return float4(perlin1, perlin2, perlin3, global_weather);
+					return float4(perlin1, perlin2, perlin3, perlin4);
 	 			#else
 					float2 sm_resolution;
 					clouds_weather_map.tex.GetDimensions(sm_resolution.x, sm_resolution.y);
@@ -1328,8 +1335,8 @@ hlsl_shaders = {
 				
 				//wind_offset.z = input.per_frame_random_data.z;
 				//curl_offset.z = input.per_frame_random_data.z;
-				//wind_offset.z = time * 5.5;
-				//curl_offset.z = time * 5.5;
+				wind_offset.z = time * 3.5;
+				curl_offset.z = time * 3.5;
 
 				// Sampling terms
 				const float distance_to_travel = min(length(ws_atmosphere_end - ws_atmosphere_start), MAX_CLOUD_DISTANCE);
@@ -2014,7 +2021,7 @@ hlsl_shaders = {
 
 				float angle = acos(dot(cam_view_dir, float2(0, 1)));
 				angle *= sign(cam_view_dir.x);
-				angle += clouds_angle -	PI * 0.5;
+				angle += clouds_angle;
 				float2x2 rotation = {cos(angle), -sin(angle), sin(angle), cos(angle)};
 				
 				if (length(centered_uv1) < 0.5)
