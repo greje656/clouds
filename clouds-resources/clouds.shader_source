@@ -94,9 +94,9 @@ hlsl_shaders = {
 				float2 clouds_advance_erode_high;
 			CBUFFER_END
 
-			float3 view_to_world(float3 view_vector, bool is_point, bool lock_xyz) {
+			float3 view_to_world_lock(float3 view_vector, bool is_point, bool lock_xyz) {
 				float lock_float = new_float(!lock_xyz);
-				float4x4 tmp_camera_inv_view = camera_inv_view;
+				float4x4 tmp_camera_inv_view = camera_inv_view[0];
 				tmp_camera_inv_view[3][0] *= lock_float;
 				tmp_camera_inv_view[3][1] *= lock_float;
 				tmp_camera_inv_view[3][2] *= lock_float;
@@ -414,12 +414,14 @@ hlsl_shaders = {
 			}
 
 			float get_altitude_density(float altitude, float density, float cloud_type, float density_end_pos) {
-				return saturate(altitude/0.5 + 0.2) * density;
+				return saturate(altitude/0.5 + 0.5) * density;
 			}
 
 			float get_high_res_cloud(Sampler3D tex, float3 clouds_sampling_coord, float low_res_clouds_data, float3 curl_offset, float altitude, float view_dependent_lerp, float density, float cloud_type, float density_end_pos) {
 				density *= 0.1;
 				float4 texture2 = TEX3DLOD(tex, clouds_sampling_coord * clouds_advance_erode_scale + curl_offset, 0);
+				texture2 = lerp(texture2, 1.0 - texture2, saturate((altitude - 0.4) * 5));
+
 				float altitude_density = get_altitude_density(altitude, density, cloud_type, density_end_pos);
 				float erode_high = lerp(clouds_advance_erode_high.x, clouds_advance_erode_high.y, view_dependent_lerp);
 
@@ -428,7 +430,8 @@ hlsl_shaders = {
 				clouds_value = set_range_clamped(clouds_value, texture2.g * erode_high, 1.0);
 				clouds_value = set_range_clamped(clouds_value, texture2.b * erode_high, 1.0);
 				
-				float wispy_bottom = lerp(texture2.a * clouds_advance_wyspie_transition, 0.0, saturate(altitude/clouds_advance_wyspie_start - 0.1));
+
+				//float wispy_bottom = lerp(texture2.a * clouds_advance_wyspie_transition, 0.0, saturate(altitude/clouds_advance_wyspie_start - 0.1));
 				//clouds_value = set_range_clamped(clouds_value, wispy_bottom, 1.0);
 				//clouds_value -= wispy_bottom;
 
@@ -754,7 +757,12 @@ hlsl_shaders = {
 					worley_value_b = set_range(worley_value_b, texture2_low, texture2_high);
 					worley_value_a = set_range(worley_value_a, texture2_low, texture2_high);
 
-					output[stu] = float4(1.0-worley_value_r, 1.0-worley_value_g, 1.0-worley_value_b, worley_value_a);
+					//worley_value_r = (worley_value_r + 1.0) * 0.5;
+					//worley_value_g = (worley_value_g + 1.0) * 0.5;
+					//worley_value_b = (worley_value_b + 1.0) * 0.5;
+					//worley_value_a = (worley_value_a + 1.0) * 0.5;
+					
+					output[stu] = float4(worley_value_r, worley_value_g, worley_value_b, worley_value_a);
 				#else
 					float3 xyz = float3((float2)st.xy/TEXTURE3_RES, 0) * curl_scale;
 					float3 curl_values = curl_noise(xyz);
@@ -848,7 +856,7 @@ hlsl_shaders = {
 	 				perlin3 = pow(perlin3, 1.00);
 	 				perlin4 = pow(perlin4, 0.50);
 
-	 				perlin1 = saturate(perlin1 * 1.2) * 0.5;
+	 				perlin1 = saturate(perlin1 * 1.2) * 0.4 + 0.1;
 	 				perlin2 = saturate(perlin2 * 1.0) * 0.5;
 	 				perlin3 = saturate(perlin3 * 1.0) * 0.5;
 	 				perlin4 = saturate(1.0 - perlin4 * 2.0);
@@ -1300,8 +1308,8 @@ hlsl_shaders = {
 				uv.y += sky_horizon_offset;
 
 				float3 ss_pos = float3(uv, 0.0);
-				float3 view_pos = ss_to_view(ss_pos, 1.0);
-				float3 ws_pos = view_to_world(view_pos, 1.0, 1.0);
+				float3 view_pos = ss_to_view(ss_pos, 1.0, 0);
+				float3 ws_pos = view_to_world_lock(view_pos, 1.0, 1.0);
 				float3 ws_origin = 0.0;
 				float3 ws_sun_dir = sun_direction;
 				float3 ws_ray = normalize(ws_pos);
@@ -1310,8 +1318,8 @@ hlsl_shaders = {
 				float3 ws_atmosphere_end = 0.0;
 				find_atmosphere_intersections(ws_origin, ws_ray, ws_atmosphere_start, ws_atmosphere_end);
 
-				float3 vs_prev_view = world_to_prev_view(ws_atmosphere_end, 1.0, 1.0);
-				float3 ss_prev_view = view_to_ss(vs_prev_view, 1);
+				float3 vs_prev_view = world_to_prev_view(ws_atmosphere_end, 1.0, 1.0, 0);
+				float3 ss_prev_view = view_to_ss(vs_prev_view, 1, 0);
 				float2 clouds_motion_vector = uv - ss_prev_view.xy;
 
 				PS_OUTPUT to_return;
@@ -1507,8 +1515,8 @@ hlsl_shaders = {
 				float4 final_color = get_final_color(scattering, extinction, wt.wetness_extinction_color, wt.wetness_extinction_blend, wt.wetness_bottom_darkening, weighted_extinction_altitude, altitude_scalar, input.extinction_color, wt.wetness_bottom_darkening_start);
 
 				// Calculate accurate cloud motion vectors
-				vs_prev_view = world_to_prev_view(closest_pos.xyz + wind_vector * 2.0, 1.0, 1.0);
-				ss_prev_view = view_to_ss(vs_prev_view, 1.0);
+				vs_prev_view = world_to_prev_view(closest_pos.xyz + wind_vector * 2.0, 1.0, 1.0, 0);
+				ss_prev_view = view_to_ss(vs_prev_view, 1.0, 0);
 				clouds_motion_vector = uv - ss_prev_view.xy;
 
 				to_return.buffer0 = final_color;
@@ -1554,8 +1562,8 @@ hlsl_shaders = {
 
 			float2 get_moon_uv_space(float2 uv){
 				float3 world_sunpos = sun_direction * SUN_DISTANCE;
-				float3 view_sunpos = world_to_view(world_sunpos, 1);
-				float3 ss_sunpos = view_to_ss(view_sunpos, 1);
+				float3 view_sunpos = world_to_view(world_sunpos, 1, 0);
+				float3 ss_sunpos = view_to_ss(view_sunpos, 1, 0);
 				float2 moon_space = (uv - ss_sunpos.xy) * float2(1.0, back_buffer_size.y/back_buffer_size.x);
 				return moon_space * (20.0 - sky_moon_disk_scale);
 			}
@@ -1576,8 +1584,8 @@ hlsl_shaders = {
 				uv.y += sky_horizon_offset;
 
 				float3 ss_pos = float3(uv, 0.0);
-				float3 view_pos = ss_to_view(ss_pos, 1.0);
-				float3 ws_pos = view_to_world(view_pos, 1.0, 1.0);
+				float3 view_pos = ss_to_view(ss_pos, 1.0, 0);
+				float3 ws_pos = view_to_world_lock(view_pos, 1.0, 1.0);
 				float3 ws_sun_dir = -sun_direction;
 				float3 ws_ray = normalize(ws_pos);
 				float3 null = 0.0;
@@ -1640,8 +1648,8 @@ hlsl_shaders = {
 			float4 ps_main(PS_INPUT input) : SV_TARGET0 {
 				float2 ss_sampling_pos = input.uv;
 				float3 world_sunpos = get_raymarch_direction(sun_direction) * SUN_DISTANCE;
-				float3 view_sunpos = world_to_view(world_sunpos, 1);
-				float3 ss_sunpos = view_to_ss(view_sunpos, 1);
+				float3 view_sunpos = world_to_view(world_sunpos, 1, 0);
+				float3 ss_sunpos = view_to_ss(view_sunpos, 1, 0);
 
 				float dangerous_angle = acos(dot(normalize(view_sunpos), float3(0,1,0)))/PI;
 				float fade_godrays = saturate(abs(dangerous_angle - 0.5) * 4.0);
@@ -1739,8 +1747,8 @@ hlsl_shaders = {
 
 			float2 get_moon_uv_space(float2 uv){
 				float3 world_sunpos = sun_direction * SUN_DISTANCE;
-				float3 view_sunpos = world_to_view(world_sunpos, 1);
-				float3 ss_sunpos = view_to_ss(view_sunpos, 1);
+				float3 view_sunpos = world_to_view(world_sunpos, 1, 0);
+				float3 ss_sunpos = view_to_ss(view_sunpos, 1, 0);
 				float2 moon_space = (uv - ss_sunpos.xy) * float2(1.0, back_buffer_size.y/back_buffer_size.x);
 				return moon_space * (20.0 - sky_moon_disk_scale);
 			}
@@ -1791,8 +1799,8 @@ hlsl_shaders = {
 				float2 uv = render_clouds ? input.uv + float2(0.0, sky_horizon_offset) : input.uv;
 				
 				float3 ss_pos = float3(uv, d);
-				float3 view_pos = ss_to_view(ss_pos, 1.0);
-				float3 ws_pos = view_to_world(view_pos, 1.0, render_clouds);
+				float3 view_pos = ss_to_view(ss_pos, 1.0, 0);
+				float3 ws_pos = view_to_world_lock(view_pos, 1.0, render_clouds);
 				float3 ws_sun_dir = -sun_direction;
 				float3 ws_ray = normalize(ws_pos);
 				float3 null = 0.0;
@@ -2007,8 +2015,8 @@ hlsl_shaders = {
  				o.position = mul( input.position, world_view_proj );				
  				o.uv = input.uv;
  				return o;
- 			}
-  
+ 			} 
+   
  			float4 ps_main( PS_INPUT input ) : SV_TARGET0 {
 				int y_offset = 20;
 				float2 centered_uv1 = (float2(input.position.x - 20, back_buffer_size.y - (input.position.y + y_offset)) / float2(input_texture0_size)) - 0.5;
@@ -2017,7 +2025,7 @@ hlsl_shaders = {
 				float2 centered_uv4 = (float2(input.position.x - 800, back_buffer_size.y - (input.position.y + y_offset)) / float2(input_texture0_size)) - 0.5;
 				
 				// Compute UV rotation to apply based on cam look direction
-				float2 cam_view_dir = normalize(camera_world._m10_m11 + float2(0, 0.00001));
+				float2 cam_view_dir = normalize(camera_world[0]._m10_m11 + float2(0, 0.00001));
 
 				float angle = acos(dot(cam_view_dir, float2(0, 1)));
 				angle *= sign(cam_view_dir.x);
