@@ -1,0 +1,11 @@
+category = "Clouds"
+render_configs = ["core/stingray_renderer/renderer"]
+display_name = "Raw Data Tiles"
+activate = """
+    Application.set_render_setting("debug_rendering", "true")
+    Application.set_render_setting("clouds_raw_data_tiles_visualization", "true")
+"""
+deactivate = """
+    Application.set_render_setting("clouds_raw_data_tiles_visualization", "false")
+    Application.set_render_setting("debug_rendering", "false")
+"""
