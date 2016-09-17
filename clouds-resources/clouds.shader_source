@@ -79,7 +79,7 @@ hlsl_shaders = {
 
 			static float2 gradient_stratocumulus = float2(0.1, 0.3);
 			static float2 gradient_cumulus = float2(0.2, 1.0);
-			static float2 gradient_cumulonimbus = float2(0.95, 1.0);
+			static float2 gradient_cumulonimbus = float2(0.75, 1.0);
 
 			CBUFFER_START(c_clouds_common)
 				float clouds_angle;
@@ -161,7 +161,7 @@ hlsl_shaders = {
 			float3 interpolation_c2( float3 x ) { return x * x * x * (x * (x * 6.0 - 15.0) + 10.0); }
 
 			// from: https://github.com/BrianSharpe/GPU-Noise-Lib/blob/master/gpu_noise_lib.glsl
-			void perlin_hash(float3 gridcell,
+			void perlin_hash(float3 gridcell, float s, bool tile, 
 								out float4 lowz_hash_0,
 								out float4 lowz_hash_1,
 								out float4 lowz_hash_2,
@@ -178,6 +178,8 @@ hlsl_shaders = {
 				float d = DOMAIN - 1.5;
 				float3 gridcell_inc1 = step( gridcell, float3( d,d,d ) ) * ( gridcell + 1.0 );
 
+				gridcell_inc1 = tile ? gridcell_inc1 % s : gridcell_inc1;
+
 				float4 P = float4( gridcell.xy, gridcell_inc1.xy ) + OFFSET.xyxy;
 				P *= P;
 				P = P.xzxz * P.yyww;
@@ -192,13 +194,16 @@ hlsl_shaders = {
 			}
 
 			// from: https://github.com/BrianSharpe/GPU-Noise-Lib/blob/master/gpu_noise_lib.glsl
-			float perlin( float3 P ) {
+			float perlin(float3 P, float s, bool tile) {
+				P *= s;
+
 				float3 Pi = floor(P);
+				float3 Pi2 = floor(P);
 				float3 Pf = P - Pi;
 				float3 Pf_min1 = Pf - 1.0;
 
 				float4 hashx0, hashy0, hashz0, hashx1, hashy1, hashz1;
-				perlin_hash( Pi, hashx0, hashy0, hashz0, hashx1, hashy1, hashz1 );
+				perlin_hash( Pi2, s, tile, hashx0, hashy0, hashz0, hashx1, hashy1, hashz1 );
 
 				float4 grad_x0 = hashx0 - 0.49999;
 				float4 grad_y0 = hashy0 - 0.49999;
@@ -217,7 +222,12 @@ hlsl_shaders = {
 				return ((final * 1.5) + 1.0) * 0.5;
 			}
 
-			float3 voronoi_hash( float3 x ) {
+			float perlin(float3 P) {
+				return perlin(P, 1, false);
+			}
+
+			float3 voronoi_hash( float3 x, float s) {
+				x = x % s;
 				x = float3( dot(x, float3(127.1,311.7, 74.7)),
 							dot(x, float3(269.5,183.3,246.1)),
 							dot(x, float3(113.5,271.9,124.6)));
@@ -225,7 +235,9 @@ hlsl_shaders = {
 				return frac(sin(x) * 43758.5453123);
 			}
 
-			float3 voronoi( in float3 x, bool inverted) {
+			float3 voronoi( in float3 x, float s, bool inverted) {
+				x *= s;
+				x += 0.5;
 				float3 p = floor(x);
 				float3 f = frac(x);
 
@@ -235,7 +247,7 @@ hlsl_shaders = {
 					for(int j=-1; j<=1; j++) {
 						for(int i=-1; i<=1; i++) {
 							float3 b = float3(i, j, k);
-							float3 r = float3(b) - f + voronoi_hash(p + b);
+							float3 r = float3(b) - f + voronoi_hash(p + b, s);
 							float d = dot(r, r);
 
 							if(d < res.x) {
@@ -260,8 +272,8 @@ hlsl_shaders = {
 			float get_worley_2_octaves(float3 p, float3 offset) {
 				float3 xyz = p + offset;
 
-				float worley_value1 = voronoi(xyz * 1.0, true).r;
-				float worley_value2 = voronoi(xyz * 2.0, false).r;
+				float worley_value1 = voronoi(xyz, 1.0, true).r;
+				float worley_value2 = voronoi(xyz, 2.0, false).r;
 
 				worley_value1 = saturate(worley_value1);
 				worley_value2 = saturate(worley_value2);
@@ -272,28 +284,28 @@ hlsl_shaders = {
 				return worley_value;;
 			}
 
-			float get_worley_3_octaves(float3 p, float3 offset) {
-				float3 xyz = p + offset;
+			float get_worley_3_octaves(float3 p, float s) {
+				float3 xyz = p;
 
-				float worley_value1 = voronoi(xyz * 1.0, true).r;
-				float worley_value2 = voronoi(xyz * 2.0, false).r;
-				float worley_value3 = voronoi(xyz * 4.0, false).r;
+				float worley_value1 = voronoi(xyz, 1.0 * s, true).r;
+				float worley_value2 = voronoi(xyz, 2.0 * s, false).r;
+				float worley_value3 = voronoi(xyz, 4.0 * s, false).r;
 
 				worley_value1 = saturate(worley_value1);
 				worley_value2 = saturate(worley_value2);
 				worley_value3 = saturate(worley_value3);
 
 				float worley_value = worley_value1;
-				worley_value = worley_value - worley_value2 * 0.25;
-				worley_value = worley_value - worley_value3 * 0.25;
+				worley_value = worley_value - worley_value2 * 0.3;
+				worley_value = worley_value - worley_value3 * 0.3;
 
 				return worley_value;;
 			}
 
-			float get_perlin_5_octaves(float3 p, float3 offset = 0) {
-				float3 xyz = p + offset;
-				float amplitude_factor = 0.5; //707f; 
-				float frequency_factor = 2.0; //5789f;
+			float get_perlin_5_octaves(float3 p, bool tile) {
+				float3 xyz = p;
+				float amplitude_factor = 0.5;
+				float frequency_factor = 2.0;
 
 				float a = 1.0;
 				float perlin_value = 0.0;
@@ -306,20 +318,19 @@ hlsl_shaders = {
 				return perlin_value;
 			}
 
-			float get_perlin_7_octaves(float3 p, float3 offset = 0) {
-				float3 xyz = p + offset;
-				float amplitude_factor = 0.5; //707f; 
-				float frequency_factor = 2.0; //5789f;
-
+			float get_perlin_7_octaves(float3 p, float s) {
+				float3 xyz = p;
+				float f = 1.0;
 				float a = 1.0;
+
 				float perlin_value = 0.0;
-				perlin_value += a * perlin(xyz).r; a *= amplitude_factor; xyz *= (frequency_factor + 0.02);
-				perlin_value += a * perlin(xyz).r; a *= amplitude_factor; xyz *= (frequency_factor + 0.03);
-				perlin_value += a * perlin(xyz).r; a *= amplitude_factor; xyz *= (frequency_factor + 0.01);
-				perlin_value += a * perlin(xyz).r; a *= amplitude_factor; xyz *= (frequency_factor + 0.01);
-				perlin_value += a * perlin(xyz).r; a *= amplitude_factor; xyz *= (frequency_factor + 0.02);
-				perlin_value += a * perlin(xyz).r; a *= amplitude_factor; xyz *= (frequency_factor + 0.03);
-				perlin_value += a * perlin(xyz).r;
+				perlin_value += a * perlin(xyz, s * f, true).r; a *= 0.5; f *= 2.0;
+				perlin_value += a * perlin(xyz, s * f, true).r; a *= 0.5; f *= 2.0;
+				perlin_value += a * perlin(xyz, s * f, true).r; a *= 0.5; f *= 2.0;
+				perlin_value += a * perlin(xyz, s * f, true).r; a *= 0.5; f *= 2.0;
+				perlin_value += a * perlin(xyz, s * f, true).r; a *= 0.5; f *= 2.0;
+				perlin_value += a * perlin(xyz, s * f, true).r; a *= 0.5; f *= 2.0;
+				perlin_value += a * perlin(xyz, s * f, true).r;
 
 				return perlin_value;
 			}
@@ -626,29 +637,29 @@ hlsl_shaders = {
 				float n1, n2, a, b;
 				float3 c;
 
-				n1 = get_perlin_5_octaves(pos.xyz + float3( 0, e, 0));
-				n2 = get_perlin_5_octaves(pos.xyz + float3( 0,-e, 0));
+				n1 = get_perlin_5_octaves(pos.xyz + float3( 0, e, 0), true);
+				n2 = get_perlin_5_octaves(pos.xyz + float3( 0,-e, 0), true);
 				a = (n1-n2)/(2*e);
-				n1 = get_perlin_5_octaves(pos.xyz + float3( 0, 0, e));
-				n2 = get_perlin_5_octaves(pos.xyz + float3( 0, 0,-e));
+				n1 = get_perlin_5_octaves(pos.xyz + float3( 0, 0, e), true);
+				n2 = get_perlin_5_octaves(pos.xyz + float3( 0, 0,-e), true);
 				b = (n1-n2)/(2*e);
 
 				c.x = a - b;
 
-				n1 = get_perlin_5_octaves(pos.xyz + float3( 0, 0, e));
-				n2 = get_perlin_5_octaves(pos.xyz + float3( 0, 0,-e));
+				n1 = get_perlin_5_octaves(pos.xyz + float3( 0, 0, e), true);
+				n2 = get_perlin_5_octaves(pos.xyz + float3( 0, 0,-e), true);
 				a = (n1-n2)/(2*e);
-				n1 = get_perlin_5_octaves(pos.xyz + float3( e, 0, 0));
-				n2 = get_perlin_5_octaves(pos.xyz + float3(-e, 0, 0));
+				n1 = get_perlin_5_octaves(pos.xyz + float3( e, 0, 0), true);
+				n2 = get_perlin_5_octaves(pos.xyz + float3(-e, 0, 0), true);
 				b = (n1-n2)/(2*e);
 
 				c.y = a - b;
 
-				n1 = get_perlin_5_octaves(pos.xyz + float3( e, 0, 0));
-				n2 = get_perlin_5_octaves(pos.xyz + float3(-e, 0, 0));
+				n1 = get_perlin_5_octaves(pos.xyz + float3( e, 0, 0), false);
+				n2 = get_perlin_5_octaves(pos.xyz + float3(-e, 0, 0), false);
 				a = (n1-n2)/(2*e);
-				n1 = get_perlin_5_octaves(pos.xyz + float3( 0, e, 0));
-				n2 = get_perlin_5_octaves(pos.xyz + float3( 0,-e, 0));
+				n1 = get_perlin_5_octaves(pos.xyz + float3( 0, e, 0), false);
+				n2 = get_perlin_5_octaves(pos.xyz + float3( 0,-e, 0), false);
 				b = (n1-n2)/(2*e);
 
 				c.z = a - b;
@@ -683,11 +694,6 @@ hlsl_shaders = {
 				float perlin_to_worley_ratio    =  0.3;
 
 				// Texture 1
-				float texture1_scale            =  2.0; 
-				float texture1_perlin_scale     =  texture1_scale * 1.5;
-				float texture1_worley_scale     =  texture1_scale * 2.0;
-
-				float texture1_frequency_scale  =  2.0;
 				float texture1_r_perlin_low     =  0.3;
 				float texture1_r_perlin_high    =  1.4;
 				float texture1_r_worley_low     = -0.3;
@@ -696,9 +702,6 @@ hlsl_shaders = {
 				float texture1_gba_worley_high  =  1.0;
 
 				// Texture 2
-				float texture2_scale            =  10.0; 
-				float texture2_frequency_scale  =  1.5;
-
 				float texture2_low              = -0.2;
 				float texture2_high             =  1.0;
 
@@ -706,11 +709,6 @@ hlsl_shaders = {
 				float curl_scale                =  3.0;
 				float curl_low                  = -0.5;
 				float curl_high                 =  3.0;
-
-				// Offsets (using prime numbers so that the noise patterns never "align")
-				float3 worley_perlin_offset     = float3( -97, -97,  -1);
-				float3 worley_offset1           = float3( 101, 101, 101);
-				float3 worley_offset2           = float3(-103,-103,-103);
 
 				#if defined(TEXTURE3)
 					uint2 st = tid.xy;
@@ -723,11 +721,11 @@ hlsl_shaders = {
 
 					// Build the perlin and worley noise of each channel of the first 3d texture. Each stage is
 					// has it's values remmaped to a range which exploits the RGBA8 efficiently
-					float perlin_r = get_perlin_7_octaves(xyz * texture1_perlin_scale * texture1_frequency_scale * 1.0, worley_perlin_offset);
-					float worley_r = get_worley_3_octaves(xyz * texture1_worley_scale * texture1_frequency_scale * 1.0, worley_offset1 * 1.0);
-					float worley_g = get_worley_3_octaves(xyz * texture1_worley_scale * texture1_frequency_scale * 1.0, worley_offset1 * 2.0);
-					float worley_b = get_worley_3_octaves(xyz * texture1_worley_scale * texture1_frequency_scale * 2.0, worley_offset1 * 3.0);
-					float worley_a = get_worley_2_octaves(xyz * texture1_worley_scale * texture1_frequency_scale * 4.0, worley_offset1 * 4.0);
+					float perlin_r = get_perlin_7_octaves(xyz, 4.0);
+					float worley_r = get_worley_3_octaves(xyz, 6.0);
+					float worley_g = get_worley_3_octaves(xyz, 6.0);
+					float worley_b = get_worley_3_octaves(xyz, 12.0);
+					float worley_a = get_worley_3_octaves(xyz, 24.0);
 
 					// Remap the values
 					perlin_r = set_range(perlin_r, texture1_r_perlin_low, texture1_r_perlin_high);
@@ -746,26 +744,21 @@ hlsl_shaders = {
 
 					// Build the lower resolution worley noise of each channel of the first 3d texture. Each stage is
 					// has it's values remmaped to a range which exploits the RGBA8 efficiently
-					float worley_value_r = get_worley_3_octaves(xyz * texture2_scale,                                  worley_offset2 * 1.0);
-					float worley_value_g = get_worley_3_octaves(xyz * texture2_scale * texture2_frequency_scale,       worley_offset2 * 2.0);
-					float worley_value_b = get_worley_2_octaves(xyz * texture2_scale * texture2_frequency_scale * 2.0, worley_offset2 * 3.0);
-					float worley_value_a = get_worley_3_octaves(xyz * texture2_scale * texture2_frequency_scale * 0.5, worley_offset2 * 4.0);
+					float worley_value_r = get_worley_3_octaves(xyz, 10);
+					float worley_value_g = get_worley_3_octaves(xyz, 15);
+					float worley_value_b = get_worley_3_octaves(xyz, 20);
+					float worley_value_a = get_worley_3_octaves(xyz, 10);
 
 					// Remap the values
 					worley_value_r = set_range(worley_value_r, texture2_low, texture2_high);
 					worley_value_g = set_range(worley_value_g, texture2_low, texture2_high);
 					worley_value_b = set_range(worley_value_b, texture2_low, texture2_high);
 					worley_value_a = set_range(worley_value_a, texture2_low, texture2_high);
-
-					//worley_value_r = (worley_value_r + 1.0) * 0.5;
-					//worley_value_g = (worley_value_g + 1.0) * 0.5;
-					//worley_value_b = (worley_value_b + 1.0) * 0.5;
-					//worley_value_a = (worley_value_a + 1.0) * 0.5;
 					
 					output[stu] = float4(worley_value_r, worley_value_g, worley_value_b, worley_value_a);
 				#else
-					float3 xyz = float3((float2)st.xy/TEXTURE3_RES, 0) * curl_scale;
-					float3 curl_values = curl_noise(xyz);
+					float3 xyz = float3((float2)st.xy/TEXTURE3_RES, 0);
+					float3 curl_values = curl_noise(xyz * 3);
 
 					curl_values = set_ranges_signed(curl_values, curl_low, curl_high);
 					
@@ -841,10 +834,10 @@ hlsl_shaders = {
 	 				float3 sampling_pos3 = float3(input.uv + xy_offset2, z_offset3) * 5.5;
 	 				float3 sampling_pos4 = float3(input.uv + xy_offset2, z_offset4) * 2.0;
 
-	 				float signal1 = get_perlin_5_octaves(sampling_pos1, 0.0);
-	 				float signal2 = get_perlin_5_octaves(sampling_pos2, 0.0);
-	 				float signal3 = get_perlin_5_octaves(sampling_pos3, 0.0);
-	 				float signal4 = get_perlin_5_octaves(sampling_pos4, 0.0);
+	 				float signal1 = get_perlin_5_octaves(sampling_pos1, false);
+	 				float signal2 = get_perlin_5_octaves(sampling_pos2, false);
+	 				float signal3 = get_perlin_5_octaves(sampling_pos3, false);
+	 				float signal4 = get_perlin_5_octaves(sampling_pos4, false);
 	 				
 	 				float perlin1 = set_range(signal1, 0.5, 1.3);
 	 				float perlin2 = set_range(signal2, 0.5, 1.3);
@@ -1028,8 +1021,8 @@ hlsl_shaders = {
 		includes = ["common" "clouds_common" "space_conversion" "post_processing_common" "sky_common" "color_management"]
 		
 		samplers = {
-			input_texture0 = { sampler_states = "mirror_linear" }
-			input_texture1 = { sampler_states = "mirror_linear" }
+			input_texture0 = { sampler_states = "wrap_linear" }
+			input_texture1 = { sampler_states = "wrap_linear" }
 			input_texture2 = { sampler_states = "mirror_linear" }
 			input_texture3 = { sampler_states = "mirror_linear" }
 			clouds_advance_altitude_cloud_map = { sampler_states = "mirror_linear" }
@@ -1697,7 +1690,7 @@ hlsl_shaders = {
 			input_texture1 = { sampler_states = "clamp_point" }
 			input_texture2 = { sampler_states = "clamp_point" }
 			input_texture3 = { sampler_states = "clamp_linear" }
-			input_texture4 = { sampler_states = "mirror_linear" }			
+			input_texture4 = { sampler_states = "wrap_linear" }			
 			sky_moon = { sampler_states = "clamp_linear" }			
 			noise = { sampler_states = "wrap_point" }			
 		}
@@ -1772,7 +1765,7 @@ hlsl_shaders = {
 				float3 stars_sampling_pos = float3(spherical_uv * 1000.0 * float2(1.0, back_buffer_size.y/back_buffer_size.x), 0);
 
 				float cluster = set_range(perlin(stars_sampling_pos * 0.8), 0.1, 0.9);
-				float stars = set_range(get_perlin_5_octaves(stars_sampling_pos), 0.5, 1.7);
+				float stars = set_range(get_perlin_5_octaves(stars_sampling_pos, false), 0.5, 1.7);
 				stars = pow(saturate(stars), 18.0 - sky_milkyway_density * milky_way * 3.0);
 				stars *= 0.5 + saturate(sin(time * 10.0 + cluster * 25.0)) * sky_star_twinkle;
 				stars *= saturate(1.0 - (spherical_uv.y + 0.4));
@@ -1858,9 +1851,9 @@ hlsl_shaders = {
 		includes = ["common" "clouds_common"]
 		
 		samplers = {
-			input_texture0 = { sampler_states = "mirror_linear" }
-			input_texture1 = { sampler_states = "mirror_linear" }
-			input_texture2 = { sampler_states = "mirror_linear" }
+			input_texture0 = { sampler_states = "wrap_linear" }
+			input_texture1 = { sampler_states = "wrap_linear" }
+			input_texture2 = { sampler_states = "wrap_linear" }
 		}
 
 		code="""
@@ -1901,6 +1894,14 @@ hlsl_shaders = {
 
 			float4 ps_main(PS_INPUT input) : SV_TARGET0 {
 
+				float clouds_debug_view = time * 0.1;
+				
+				#if defined(TILES)
+					float ratio = back_buffer_size.y/back_buffer_size.x;
+					float4 texture1 = TEX3D(input_texture0, float3(input.uv * 5.0 * float2(1.0, ratio), clouds_debug_view));
+					return texture1.r;
+				#endif
+
 				if(input.position.x > DEBUG_WIN_SIZE * 4){
 					float altitude = 1.0 - input.uv.y;
 					float cloud_type = (input.position.x - DEBUG_WIN_SIZE * 4)/(back_buffer_size.x - DEBUG_WIN_SIZE * 4);
@@ -1910,7 +1911,6 @@ hlsl_shaders = {
 
 				float2 debug_width = back_buffer_size/float2(DEBUG_WIN_SIZE, DEBUG_WIN_SIZE);
 
-				float clouds_debug_view = (sin(time) + 1.0) * 0.5;
 				// Debug view for texture 1
 				if(input.position.y < DEBUG_WIN_SIZE) {
 					if(input.position.x < DEBUG_WIN_SIZE) {
@@ -2256,6 +2256,7 @@ static_compile= [
 	{ if: "on_renderer(D3D11)" shader="generate_godrays" }
 	{ if: "on_renderer(D3D11)" shader="merge_clouds_with_scene" }
 	{ if: "on_renderer(D3D11)" shader="debug_clouds" }
+	{ if: "on_renderer(D3D11)" shader="debug_clouds" defines=["TILES"] }
 	{ if: "on_renderer(D3D11)" shader="debug_weather" }
 
 ]

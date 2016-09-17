@@ -2,6 +2,7 @@ append = {
 	render_settings = {
 		clouds_enabled = true
 		clouds_raw_data_visualization = false
+		clouds_raw_data_tiles_visualization = false
 		clouds_weather_data_visualization = false
 	}
 
@@ -91,6 +92,12 @@ insert_at = {
 			{ type="dynamic_branch" render_settings={ clouds_raw_data_visualization=true }
 				pass = [
 					{ type="fullscreen_pass" shader="debug_clouds" input=["clouds_result_texture1" "clouds_result_texture2" "clouds_result_texture3"] output=["output_target"] }
+				]
+			}
+
+			{ type="dynamic_branch" render_settings={ clouds_raw_data_tiles_visualization=true }
+				pass = [
+					{ type="fullscreen_pass" shader="debug_clouds:TILES" input=["clouds_result_texture1" "clouds_result_texture2" "clouds_result_texture3"] output=["output_target"] }
 				]
 			}
 		]
