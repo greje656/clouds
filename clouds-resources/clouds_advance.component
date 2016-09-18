@@ -340,9 +340,9 @@ types = {
                     step = 0.0001
                 }
             }                      
-            clouds_advance_erode_low = {
+            clouds_advance_erode = {
                 type = "core/types/range"
-                default = [0.3, 0.3]
+                default = [0.3, 0.25]
                 value = {
                     type = ":number"
                     min = 0.0
@@ -352,22 +352,7 @@ types = {
                     }
                 }
                 editor = {
-                    label = "Erode Low (Near/Far)"
-                }
-            }
-            clouds_advance_erode_high = {
-                type = "core/types/range"
-                default = [0.3, 0.3]
-                value = {
-                    type = ":number"
-                    min = 0.0
-                    max = 1.0
-                    editor = {
-                        step = 0.0001
-                    }
-                }
-                editor = {
-                    label = "Erode Low (Near/Far)"
+                    label = "Erode Low/High"
                 }
             }
             clouds_advance_curl_amplitude = {
