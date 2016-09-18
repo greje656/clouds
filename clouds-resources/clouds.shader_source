@@ -437,9 +437,9 @@ hlsl_shaders = {
 				float erode_high = lerp(clouds_advance_erode_high.x, clouds_advance_erode_high.y, view_dependent_lerp);
 
 				float clouds_value = low_res_clouds_data.r;
-				clouds_value = set_range_clamped(clouds_value, texture2.r * erode_high, 1.0); 
-				clouds_value = set_range_clamped(clouds_value, texture2.g * erode_high, 1.0);
-				clouds_value = set_range_clamped(clouds_value, texture2.b * erode_high, 1.0);
+				clouds_value = set_range_clamped(clouds_value, texture2.r * erode_high * 1.0, 1.0); 
+				clouds_value = set_range_clamped(clouds_value, texture2.g * erode_high * 0.8, 1.0);
+				clouds_value = set_range_clamped(clouds_value, texture2.b * erode_high * 0.6, 1.0);
 				
 
 				//float wispy_bottom = lerp(texture2.a * clouds_advance_wyspie_transition, 0.0, saturate(altitude/clouds_advance_wyspie_start - 0.1));
@@ -1899,7 +1899,25 @@ hlsl_shaders = {
 				#if defined(TILES)
 					float ratio = back_buffer_size.y/back_buffer_size.x;
 					float4 texture1 = TEX3D(input_texture0, float3(input.uv * 5.0 * float2(1.0, ratio), clouds_debug_view));
-					return texture1.r;
+					float4 texture2 = TEX3D(input_texture1, float3(input.uv * 5.0 * float2(1.0, ratio), clouds_debug_view));
+
+					uint texture_switch = (frame_number * 0.05) % 8;
+					if(texture_switch == 0)
+						return texture1.r;
+					if(texture_switch == 1)
+						return texture1.g;
+					if(texture_switch == 2)
+						return texture1.b;
+					if(texture_switch == 3)
+						return texture1.a;
+					if(texture_switch == 4)
+						return texture2.r;
+					if(texture_switch == 5)
+						return texture2.g;
+					if(texture_switch == 6)
+						return texture2.b;
+					if(texture_switch == 7)
+						return texture2.a;
 				#endif
 
 				if(input.position.x > DEBUG_WIN_SIZE * 4){
