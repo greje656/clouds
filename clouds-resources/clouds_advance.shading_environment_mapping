@@ -22,8 +22,7 @@ shading_component_mapping = {
 	clouds_advance_powder_top = { type="scalar" path=["clouds_advance_powder_top"] }
 	clouds_advance_scale = { type="scalar" path=["clouds_advance_scale"] }
 	clouds_advance_erode_scale = { type="scalar" path=["clouds_advance_erode_scale"] }
-	clouds_advance_erode_low = { type="vector2" path=["clouds_advance_erode_low"] }
-	clouds_advance_erode_high = { type="vector2" path=["clouds_advance_erode_high"] }
+	clouds_advance_erode = { type="vector2" path=["clouds_advance_erode"] }
 	clouds_advance_wyspie_transition = { type="scalar" path=["clouds_advance_wyspie_transition"] }
 	clouds_advance_local_density_end = { type="vector2" path=["clouds_advance_local_density_end"] }
 	clouds_advance_wyspie_start = { type="scalar" path=["clouds_advance_wyspie_start"] }

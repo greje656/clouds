@@ -90,8 +90,7 @@ hlsl_shaders = {
 				float clouds_advance_wyspie_start;
 				float clouds_advance_wyspie_transition;
 				float sky_fog_fade;
-				float2 clouds_advance_erode_low;
-				float2 clouds_advance_erode_high;
+				float2 clouds_advance_erode;
 			CBUFFER_END
 
 			float3 view_to_world_lock(float3 view_vector, bool is_point, bool lock_xyz) {
@@ -402,9 +401,8 @@ hlsl_shaders = {
 				return saturate((distance - 5000)/20000.0);
 			}
 
-			float get_low_res_cloud(float4 texture1, float altitude, float altitude_scalar, float2 gradient_values, float view_dependent_lerp, float cloud_coverage, float fade_term) {
+			float get_low_res_cloud(float4 texture1, float altitude, float altitude_scalar, float2 gradient_values, float view_dependent_lerp, float cloud_coverage, float fade_term, float erode_low) {
 				float altitude_coverage = get_altitude_coverage(altitude, gradient_values);
-				float erode_low = lerp(clouds_advance_erode_low.x, clouds_advance_erode_low.y, view_dependent_lerp);
 
 				// Here we add coverage but only at the bottoms of the clouds to get a pancake 
 				// look for distant clouds
@@ -416,6 +414,7 @@ hlsl_shaders = {
 
 				float low_range = lerp(1.0, c * COVERAGE_SCALAR + COVERAGE_OFFSET - extra_coverage, altitude_coverage);
 				low_range = saturate(low_range);
+
 				float clouds_value = set_range_clamped(texture1.r, low_range, 1.0);
 				clouds_value = set_range_clamped(clouds_value, texture1.g * erode_low, 1.0); 
 				clouds_value = set_range_clamped(clouds_value, texture1.b * erode_low, 1.0);
@@ -425,28 +424,22 @@ hlsl_shaders = {
 			}
 
 			float get_altitude_density(float altitude, float density, float cloud_type, float density_end_pos) {
-				return saturate(altitude/0.5 + 0.5) * density;
+				return saturate(altitude/0.5 + 0.1) * density;
 			}
 
-			float get_high_res_cloud(Sampler3D tex, float3 clouds_sampling_coord, float low_res_clouds_data, float3 curl_offset, float altitude, float view_dependent_lerp, float density, float cloud_type, float density_end_pos) {
+			float get_high_res_cloud(Sampler3D tex, float3 clouds_sampling_coord, float low_res_clouds_data, float3 curl_offset, float altitude, float view_dependent_lerp, float density, float cloud_type, float density_end_pos, float erode_high) {
 				density *= 0.1;
 				float4 texture2 = TEX3DLOD(tex, clouds_sampling_coord * clouds_advance_erode_scale + curl_offset, 0);
 				texture2 = lerp(texture2, 1.0 - texture2, saturate((altitude - 0.4) * 5));
 
 				float altitude_density = get_altitude_density(altitude, density, cloud_type, density_end_pos);
-				float erode_high = lerp(clouds_advance_erode_high.x, clouds_advance_erode_high.y, view_dependent_lerp);
 
 				float clouds_value = low_res_clouds_data.r;
-				clouds_value = set_range_clamped(clouds_value, texture2.r * erode_high, 1.0); 
-				clouds_value = set_range_clamped(clouds_value, texture2.g * erode_high, 1.0);
-				clouds_value = set_range_clamped(clouds_value, texture2.b * erode_high, 1.0);
+				clouds_value = set_range_clamped(clouds_value, texture2.r * erode_high * 1.0, 1.0); 
+				clouds_value = set_range_clamped(clouds_value, texture2.g * erode_high * 0.8, 1.0);
+				clouds_value = set_range_clamped(clouds_value, texture2.b * erode_high * 0.6, 1.0);
 				
-
-				//float wispy_bottom = lerp(texture2.a * clouds_advance_wyspie_transition, 0.0, saturate(altitude/clouds_advance_wyspie_start - 0.1));
-				//clouds_value = set_range_clamped(clouds_value, wispy_bottom, 1.0);
-				//clouds_value -= wispy_bottom;
-
-				clouds_value = clouds_value * altitude_density * (cloud_type + 0.2);
+				clouds_value = clouds_value * altitude_density;
 
 				return clouds_value;
 			}
@@ -855,8 +848,8 @@ hlsl_shaders = {
 	 				perlin4 = saturate(1.0 - perlin4 * 2.0);
 
 	 				perlin1 -= perlin4 * 0.5;
-	 				perlin2 += perlin4 * 2.0;
-	 				perlin3 += perlin4 * 1.0;
+	 				perlin2 += pow(perlin4, 2.0);
+	 				perlin3 += perlin4;
 
 					return float4(perlin1, perlin2, perlin3, perlin4);
 	 			#else
@@ -1265,6 +1258,11 @@ hlsl_shaders = {
 				return lerp(8.0, 2.0, cloud_type);
 			}
 
+			float2 get_clouds_erosion(float coverage){
+				float2 s = saturate(coverage / 0.2 + float2(0, 0.5));
+				return clouds_advance_erode * s;
+			}
+
 			void update_wetness_terms(inout WetnessTerms wt, float cloud_wetness){
 				wt.wetness_extinction             = lerp( clouds_advance_extinction.x, clouds_advance_extinction.y, cloud_wetness);
 				wt.wetness_extinction_near        = lerp( clouds_advance_extinction_near.x, clouds_advance_extinction_near.y, cloud_wetness);
@@ -1389,10 +1387,11 @@ hlsl_shaders = {
 					float view_dependent_lerp = saturate(distance_from_origin * 2.0);
 
 					float4 texture1 = TEX3DLOD(input_texture0, clouds_sampling_coord, 0.0);
-					float low_res_clouds = get_low_res_cloud(texture1, altitude, altitude_scalar, gradient_values, view_dependent_lerp, weather_data.r, fade_term);
+					float2 erode_low_high = get_clouds_erosion(weather_data.r);
+					float low_res_clouds = get_low_res_cloud(texture1, altitude, altitude_scalar, gradient_values, view_dependent_lerp, weather_data.r, fade_term, erode_low_high.x);
 					
 					float3 curl = get_curl_offset(input_texture2, curl_sampling_coord, clouds_advance_curl_amplitude, clouds_advance_curl_frequency, altitude);
-					float high_res_cloud = get_high_res_cloud(input_texture1, clouds_sampling_coord, low_res_clouds, curl, altitude, view_dependent_lerp, clouds_global_density, weather_data.g, wt.wetness_density_end_pos);
+					float high_res_cloud = get_high_res_cloud(input_texture1, clouds_sampling_coord, low_res_clouds, curl, altitude, view_dependent_lerp, clouds_global_density, weather_data.g, wt.wetness_density_end_pos, erode_low_high.y);
 
 					[flatten]
 					if(high_res_cloud <= CLOUD_DENSITY_THRESHOLD)
@@ -1430,14 +1429,15 @@ hlsl_shaders = {
 							break;
 
 						float4 texture1 = TEX3DLOD(input_texture0, clouds_sampling_coord, 0);
-						float low_res_clouds = get_low_res_cloud(texture1, altitude, altitude_scalar, gradient_values, view_dependent_lerp, weather_data.r, fade_term);
+						float2 erode_low_high = get_clouds_erosion(weather_data.r);
+						float low_res_clouds = get_low_res_cloud(texture1, altitude, altitude_scalar, gradient_values, view_dependent_lerp, weather_data.r, fade_term, erode_low_high.x);
 						float clouds_value = low_res_clouds;
 
 						[branch]
 						if(extinction > 0.3) {
 							// If are ray march is hasn't absorbed too much light yet, we use the high res cloud data to 
 							// calculate the self occlusion of the cloud
-							clouds_value = get_high_res_cloud(input_texture1, clouds_sampling_coord, low_res_clouds, 0, altitude, view_dependent_lerp, clouds_global_density, weather_data.g, wt.wetness_density_end_pos);
+							clouds_value = get_high_res_cloud(input_texture1, clouds_sampling_coord, low_res_clouds, 0, altitude, view_dependent_lerp, clouds_global_density, weather_data.g, wt.wetness_density_end_pos, erode_low_high.y);
 						}
 
 						float extinction_coeff = extinction_altitude_scalar * self_shadowing_extinction * clouds_value;
@@ -1899,7 +1899,25 @@ hlsl_shaders = {
 				#if defined(TILES)
 					float ratio = back_buffer_size.y/back_buffer_size.x;
 					float4 texture1 = TEX3D(input_texture0, float3(input.uv * 5.0 * float2(1.0, ratio), clouds_debug_view));
-					return texture1.r;
+					float4 texture2 = TEX3D(input_texture1, float3(input.uv * 5.0 * float2(1.0, ratio), clouds_debug_view));
+
+					uint texture_switch = (frame_number * 0.05) % 8;
+					if(texture_switch == 0)
+						return texture1.r;
+					if(texture_switch == 1)
+						return texture1.g;
+					if(texture_switch == 2)
+						return texture1.b;
+					if(texture_switch == 3)
+						return texture1.a;
+					if(texture_switch == 4)
+						return texture2.r;
+					if(texture_switch == 5)
+						return texture2.g;
+					if(texture_switch == 6)
+						return texture2.b;
+					if(texture_switch == 7)
+						return texture2.a;
 				#endif
 
 				if(input.position.x > DEBUG_WIN_SIZE * 4){
