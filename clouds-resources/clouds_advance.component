@@ -19,7 +19,7 @@ types = {
             }
             clouds_advance_ambient_top = {
                 type = ":number"
-                default = 0.0
+                default = 0.005
                 min = 0.0
                 max = 0.5
                 editor = {
@@ -61,7 +61,7 @@ types = {
             clouds_advance_extinction_color2 = {
                 type = "core/types/color"
                 fields = {
-                    rgb = { default = [1.0, 0.3, 0.0] }
+                    rgb = { default = [0.675, 0.675, 0.574] }
                     alpha = { default = 1.0 }
                     intensity = { default = 1.0 }
                 }
@@ -72,7 +72,7 @@ types = {
             clouds_advance_extinction_color3 = {
                 type = "core/types/color"
                 fields = {
-                    rgb = { default = [0.5, 0.6, 0.7] }
+                    rgb = { default = [0.005, 0.015, 0.02] }
                     alpha = { default = 1.0 }
                     intensity = { default = 1.0 }
                 }
@@ -152,7 +152,7 @@ types = {
             }       
             clouds_advance_extinction_near = {
                 type = "core/types/range"
-                default = [1.5, 4.0]
+                default = [1.5, 1.5]
                 value = {
                     type = ":number"
                     min = 0.0
@@ -167,7 +167,7 @@ types = {
             }
             clouds_advance_extinction_far = {
                 type = "core/types/range"
-                default = [2.0, 3.0]
+                default = [2.0, 2.0]
                 value = {
                     type = ":number"
                     min = 0.0
@@ -197,7 +197,7 @@ types = {
             }
             clouds_advance_scattering = {
                 type = "core/types/range"
-                default = [100, 20]
+                default = [100, 10]
                 value = {
                     type = ":number"
                     min = 0.0
@@ -212,7 +212,7 @@ types = {
             }
             clouds_advance_extinction_color_scalar = {
                 type = "core/types/range"
-                default = [1.0, 0.3]
+                default = [0.8, 0.3]
                 value = {
                     type = ":number"
                     min = 0.0
@@ -227,7 +227,7 @@ types = {
             }
             clouds_advance_powder_amount_near = {
                 type = "core/types/range"
-                default = [1.2, 1.2]
+                default = [1.1, 1.1]
                 value = {
                     type = ":number"
                     min = 0.0
@@ -242,7 +242,7 @@ types = {
             }
             clouds_advance_powder_amount_far = {
                 type = "core/types/range"
-                default = [1.2, 1.2]
+                default = [1.1, 1.1]
                 value = {
                     type = ":number"
                     min = 0.0

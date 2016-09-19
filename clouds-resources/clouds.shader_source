@@ -1343,6 +1343,8 @@ hlsl_shaders = {
 				const float earth_radius_plus_clouds_start = EARTH_RADIUS + CLOUDS_START;
 				const float clouds_end_minus_clouds_start = CLOUDS_END - CLOUDS_START;
 				
+				const float night_time = get_night_time(-sun_direction, 3.0, -0.25);
+
 				// Note: By using a dithered pattern using pixel_pos % 4 we stay cache friendly when we update
 				// our quarter res buffers. 
 				float random_offset = dither_pattern[pixel_pos.x % 4][pixel_pos.y % 4] * 5.0;
@@ -1451,7 +1453,7 @@ hlsl_shaders = {
 					float extinction_coeff = extinction_altitude_scalar * wt.wetness_extinction * high_res_cloud;
 					
 					// Out scattering
-					float powder_amount = lerp(wt.wetness_powder_near, wt.wetness_powder_far, view_dependent_lerp);
+					float powder_amount = lerp(wt.wetness_powder_near, wt.wetness_powder_far, view_dependent_lerp) * night_time;
 					float powder_coeff = lerp(wt.wetness_powder_coef_near, wt.wetness_powder_coef_far, view_dependent_lerp) * high_res_cloud;
 
 					// Update absorbtion
@@ -1587,10 +1589,10 @@ hlsl_shaders = {
 				float fog = get_fog_factor(ws_ray.z);
 
 				float2 moon_space = get_moon_uv_space(input.uv) * 0.05;
-				float moon_distance_threshold = 0.01;
+				float moon_distance_threshold = 0.001;
 				float moon_distance = (max(moon_distance_threshold, saturate(length(moon_space))) - moon_distance_threshold)/(1.0 - moon_distance_threshold);
 				float3 moon_color = lerp(sky_night_moon_color.rgb, 0, pow(saturate(moon_distance), 0.01));
-				moon_color = min(0.2, moon_color * sky_moon_glow);
+				moon_color = min(0.2, moon_color * sky_moon_glow * 1000.0);
 				moon_color *= get_night_time(sun_direction, 4.0, -0.25);
 				//moon_color *= dot(ws_ray, sun_direction) > 0.0;
 
@@ -1809,7 +1811,7 @@ hlsl_shaders = {
 					float3 sky_color = preethams_sky(ws_sun_dir, ws_pos, 0.0, null, true, null);
 					float4 clouds = TEX2DLOD(input_texture2, input.uv, 0.0);
 
-					float3 moon = get_moon_color(input.uv, ws_ray) * (1.0 - clouds.a);
+					float3 moon = get_moon_color(input.uv, ws_ray) * (1.0 - clouds.a * 0.5);
 					float3 stars = get_stars_color(ws_pos) * saturate(1.0 - clouds.a * 1.5);
 					float3 astres = moon + stars;
 

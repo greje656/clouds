@@ -99,7 +99,7 @@ types = {
             }
             sky_turbidity = {
                 type = ":number"
-                default = 1.0
+                default = 0.2
                 min = 0.0
                 max = 20
                 editor = {
@@ -163,7 +163,7 @@ types = {
                 fields = {
                     rgb = { default = [0.635, 0.8, 1.0] }
                     alpha = { default = 1.0 }
-                    intensity = { default = 0.5 }
+                    intensity = { default = 0.004 }
                 }
                 editor = {
                     label = "Night Moon Color"
@@ -174,7 +174,7 @@ types = {
                 fields = {
                     rgb = { default = [0.635, 0.8, 1.0] }
                     alpha = { default = 1.0 }
-                    intensity = { default = 0.5 }
+                    intensity = { default = 1.0 }
                 }
                 editor = {
                     label = "Night Ambient Color"
@@ -193,7 +193,7 @@ types = {
             }
             sky_moon_glow = {
                 type = ":number"
-                default = 4.0
+                default = 3.0
                 min = 0.0
                 max = 20.0
                 editor = {
@@ -203,7 +203,7 @@ types = {
             }
             sky_moon_disk_scale = {
                 type = ":number"
-                default = 5.0
+                default = 1.0
                 min = 0.0
                 max = 30
                 editor = {
@@ -246,7 +246,7 @@ types = {
                 fields = {
                     rgb = { default = [1.0, 0.7, 0.75] }
                     alpha = { default = 1.0 }
-                    intensity = { default = 10.0 }
+                    intensity = { default = 50.0 }
                 }
                 editor = {
                     label = "Stars Color 1"
@@ -257,7 +257,7 @@ types = {
                 fields = {
                     rgb = { default = [0.65, 0.8, 1.0] }
                     alpha = { default = 1.0 }
-                    intensity = { default = 10.0 }
+                    intensity = { default = 50.0 }
                 }
                 editor = {
                     label = "Stars Color 2"
