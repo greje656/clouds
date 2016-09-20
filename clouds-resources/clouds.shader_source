@@ -1488,6 +1488,7 @@ hlsl_shaders = {
 				#else
 					float high_altitude_cloud_coverage = clouds_advance_altitude_cloud_coverage;
 				#endif
+				high_altitude_cloud_coverage *= night_time;
 
 				get_high_altitude_clouds_contribution(ws_atmosphere_start, input.sun_color, scattering, extinction, input.uv, high_altutude_sun_phase, high_altitude_cloud_coverage);
 
