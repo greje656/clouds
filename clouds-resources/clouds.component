@@ -148,6 +148,7 @@ types = {
         metadata = {
             component = "data"
             tags = ["shading_environment"]
+            name = "Clouds"
         }
     }
 }
