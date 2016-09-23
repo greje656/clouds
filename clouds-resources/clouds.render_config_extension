@@ -14,15 +14,15 @@ append = {
 		{ type="static_branch" render_settings={ clouds_enabled=true }
 			pass = [
 				// Clouds modelling resources:
-				{ name="clouds_result_texture1" type="render_target" image_type="image_3d" width=256 height=256 layers=256 format="R8G8B8A8" }
+				{ name="clouds_result_texture1" type="render_target" image_type="image_3d" width=128 height=128 layers=128 format="R8G8B8A8" }
 				{ name="clouds_result_texture2" type="render_target" image_type="image_3d" width=64 height=64 layers=64 format="R8G8B8A8" }
 				{ name="clouds_result_texture3" type="render_target" image_type="image_2d" width=128 height=128 format="R8G8B8A8" }
 				{ name="clouds_weather_texture" type="render_target" image_type="image_2d" width=256 height=256 format="R8G8B8A8" }
 
 				// Clouds rendering resources:
 				{ name="clouds_buffer" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R16G16B16A16F" }
-				{ name="clouds_buffer_low_res" type="render_target" depends_on="output_target" w_scale=0.25 h_scale=0.25 format="R16G16B16A16F" }
-				{ name="clouds_motion_vectors" type="render_target" depends_on="output_target" w_scale=0.25 h_scale=0.25 format="R16G16F" }
+				{ name="clouds_buffer_low_res" type="render_target" depends_on="output_target" w_scale=0.2 h_scale=0.2 format="R16G16B16A16F" }
+				{ name="clouds_motion_vectors" type="render_target" depends_on="output_target" w_scale=0.2 h_scale=0.2 format="R16G16F" }
 				{ name="clouds_atmosphere" type="render_target" depends_on="output_target" w_scale=0.25 h_scale=0.25 format="R16G16B16A16F" }
 				{ name="clouds_godrays" type="render_target" depends_on="output_target" w_scale=0.5 h_scale=0.5 format="R16G16B16A16F" }
 				{ name="clouds_history_buffer" type="render_target" depends_on="output_target" w_scale=1 h_scale=1 format="R16G16B16A16F" }
