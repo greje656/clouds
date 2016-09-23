@@ -993,9 +993,12 @@ hlsl_shaders = {
 					if(reprojection_is_offscreen)
 						prev_color = upsampled_color;
 
-					float mv_history_diff = length(clouds_motion_vector) * 5.0;
+					float4x4 cam = camera_view[0];
+					float4x4 last_cam = camera_last_view[0];
+					float camera_rotation = saturate(100.0 * (length(cam[0] - last_cam[0]))) * 0.5;
+
 					float wind_speed_history_diff = lerp(1.0/64.0, 0.5, saturate(clouds_wind_speed));
-					float history_diff = mv_history_diff + wind_speed_history_diff;
+					float history_diff = camera_rotation + wind_speed_history_diff;
 					history_diff = clamp(history_diff, 1.0/64.0, 0.75);
 
 					reprojected_color = lerp(prev_color, upsampled_color, history_diff);
@@ -1511,7 +1514,8 @@ hlsl_shaders = {
 				float4 final_color = get_final_color(scattering, extinction, wt.wetness_extinction_color, wt.wetness_extinction_blend, wt.wetness_bottom_darkening, weighted_extinction_altitude, altitude_scalar, input.extinction_color, wt.wetness_bottom_darkening_start);
 
 				// Calculate accurate cloud motion vectors
-				vs_prev_view = world_to_prev_view(closest_pos.xyz + wind_vector * 2.0, 1.0, 1.0, 0);
+				// (Why do we need this mysterious "9.0 * clouds_wind_speed" factor in?)
+				vs_prev_view = world_to_prev_view(closest_pos.xyz + wind_vector * 9.0 * clouds_wind_speed, 1.0, 1.0, 0);
 				ss_prev_view = view_to_ss(vs_prev_view, 1.0, 0);
 				clouds_motion_vector = uv - ss_prev_view.xy;
 
