@@ -1399,7 +1399,7 @@ hlsl_shaders = {
 					float high_res_cloud = get_high_res_cloud(input_texture1, clouds_sampling_coord, low_res_clouds, curl, altitude, view_dependent_lerp, clouds_global_density, weather_data.g, wt.wetness_density_end_pos, erode_low_high.y);
 
 					[flatten]
-					if(high_res_cloud <= CLOUD_DENSITY_THRESHOLD)
+					if(high_res_cloud == 0.0)
 						continue;
 
 					// Here we calculate a rough term for how much self occlusion occurs for that sample. We use

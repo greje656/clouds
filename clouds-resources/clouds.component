@@ -146,7 +146,7 @@ types = {
             icon = "certificate"
         }
         metadata = {
-            component = "data"
+            component = "render_data"
             tags = ["shading_environment"]
             name = "Clouds"
         }
