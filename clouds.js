@@ -3,10 +3,11 @@
  * @module
  */
 define([
+    'lodash',
     'services/engine-service',
     'services/project-service',
     'services/file-system-service'
-], function () {
+], function (_) {
     "use strict";
     
     /** @type {FileSystemService} */
@@ -28,13 +29,19 @@ define([
         return projectService.getCurrentProjectPath();
     }
     
+    function getEngineSettingsFilePath() {
+        return getProjectPath().then(function (projectPath) {
+            return fs.join(projectPath, "settings.ini");
+        });
+    }
+    
     /**
      * Get project engine settings.
      * @return {Promise.<object>} SJSON of the engine settings.
      */
     function getEngineSettings() {
-        return getProjectPath().then(function (projectPath) {
-            return fs.readJSON(fs.join(projectPath, "settings.ini"));
+        return getEngineSettingsFilePath().then(function (engineSettingsFilePath) {
+            return fs.readJSON(engineSettingsFilePath);
         });
     }
     
@@ -45,10 +52,21 @@ define([
         return getEngineSettings().then(function (engineSettings) {
             /** @type {string[]} */
             let renderConfigExtensions = engineSettings.render_config_extension;
-            if (_.isArray(renderConfigExtensions))
+            if (!_.isArray(renderConfigExtensions))
                 return false;
             
             return renderConfigExtensions.indexOf(CLOUDS_RENDER_CONFIG_NAME) >= 0;
+        });
+    }
+    
+    /**
+     * Saves settings to the engine settings.ini file.
+     * @param {object} engineSettings - Settings to be saved.
+     * @return {Promise} Resolves when the file is saved.
+     */
+    function saveEngineSettings(engineSettings) {
+        return getEngineSettingsFilePath().then(function (engineSettingsFilePath) {
+            return fs.writeJSON(engineSettingsFilePath, engineSettings);
         });
     }
     
@@ -63,9 +81,11 @@ define([
             
             // Add the clouds render config extension to the settings.ini
             //
+            console.info('Adding clouds render config extension to engine settings (`settings.ini`)');
             return getEngineSettings().then(function (engineSettings) {
                 engineSettings.render_config_extension = engineSettings.render_config_extension || [];
                 engineSettings.render_config_extension.push(CLOUDS_RENDER_CONFIG_NAME);
+                return saveEngineSettings(engineSettings);
             }).then(function () {
                 return engineService.compile();
             });
