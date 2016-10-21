@@ -7,15 +7,15 @@ components = {
 			"$resource_type" = "component"
 		}
 	}
-	"6e422ebe-3c7a-4e83-86b4-1285ea771c32" = {
-		"$component" = {
-			"$resource_name" = "clouds-resources/clouds_advance"
-			"$resource_type" = "component"
-		}
-	}
 	"62729a8c-3e67-41f3-8eca-d9a18782eb01" = {
 		"$component" = {
 			"$resource_name" = "clouds-resources/sky"
+			"$resource_type" = "component"
+		}
+	}
+	"6e422ebe-3c7a-4e83-86b4-1285ea771c32" = {
+		"$component" = {
+			"$resource_name" = "clouds-resources/clouds_advance"
 			"$resource_type" = "component"
 		}
 	}

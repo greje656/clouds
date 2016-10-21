@@ -51,7 +51,7 @@ define([
     function checkCloudsRenderConfigExtension () {
         return getEngineSettings().then(function (engineSettings) {
             /** @type {string[]} */
-            let renderConfigExtensions = engineSettings.render_config_extension;
+            let renderConfigExtensions = engineSettings.render_config_extensions;
             if (!_.isArray(renderConfigExtensions))
                 return false;
             
@@ -83,11 +83,15 @@ define([
             //
             console.info('Adding clouds render config extension to engine settings (`settings.ini`)');
             return getEngineSettings().then(function (engineSettings) {
-                engineSettings.render_config_extension = engineSettings.render_config_extension || [];
-                engineSettings.render_config_extension.push(CLOUDS_RENDER_CONFIG_NAME);
+                engineSettings.render_config_extensions = engineSettings.render_config_extensions || [];
+                engineSettings.render_config_extensions.push(CLOUDS_RENDER_CONFIG_NAME);
                 return saveEngineSettings(engineSettings);
             }).then(function () {
                 return engineService.compile();
+            }).then(function () {
+                // TODO: Ideally the engine API would allow us to refresh
+                // render config extensions instead of killing the engine and restart it.
+                return engineService.restartEditorEngine();
             });
         });
     }
