@@ -2,7 +2,7 @@
 //
 name = "Clouds Plugin"
 description = "Clouds Plugin."
-version = "0.1.0"
+version = "0.2.0"
 author = {
     name = "Jp"
     url = "https://github.com/greje656/clouds#clouds"
@@ -36,5 +36,5 @@ extensions = {
 //
 platforms = ["win64"]
 dependencies = {
-    "stingray" = ">=1.6"
+	"stingray" = ">=1.7"
 }
