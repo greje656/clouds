@@ -2,47 +2,39 @@
 //
 name = "Clouds Plugin"
 description = "Clouds Plugin."
-version = "0.0.2"
+version = "0.2.0"
 author = {
-	name = "Jp"
+    name = "Jp"
+    url = "https://github.com/greje656/clouds#clouds"
+}
+repository = {
+    type = "git"
+    url = "https://github.com/greje656/clouds.git"
 }
 keywords = ["clouds", "plugin"]
+thumbnail = "thumbnail.gif"
 
 // Extensions
 //
 extensions = {
-	menus = [
-		{
-			path = "Developer/Clouds/Generate"
-			action = {
-				type = "lua"
-				script = """
-					require "clouds-resources/clouds"
-					local result = Clouds:generate()
-					print("Cloud generated", result)
-				"""
-			}
-			shortcut = "Ctrl+B"
-		}
-	]
+    menus = [
+        {
+            path = "Create/Clouds"
+            order = 105
+            action = { type = "js" module = "clouds/clouds" function_name = "createClouds" }
+        }
+    ]
 
-	resources = [
-		{
-			path = "clouds-resources"
-		}
-	]
-
-	services = [
-		{
-			name = "clouds-service"
-			module = "clouds-service.js"
-		}
-	]	
+    resources = [
+        {
+            path = "clouds-resources"
+        }
+    ]
 }
 
 // Dependencies
 //
 platforms = ["win64"]
 dependencies = {
-	"stingray" = ">=1.4"
+	"stingray" = ">=1.7"
 }
