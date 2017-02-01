@@ -12,3 +12,5 @@ https://www.youtube.com/watch?v=lZ1i3b5fa5U
     render_config_extensions = [ "clouds-resources/clouds" ]
     ```
 3. Drag a clouds entity in the scene
+
+Known limitation. autoload needs to be set to 'true' in settings.ini when launching a project with clouds in it.
